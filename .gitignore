@@ -1,0 +1,20 @@
+# Local Python environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+secrets/
+config.yaml
+
+# Runtime output (JSONL may contain task context)
+logs/*.jsonl
+
+# Tooling and OS noise
+.pytest_cache/
+.mypy_cache/
+.DS_Store

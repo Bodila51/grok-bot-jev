@@ -1,0 +1,19 @@
+# Copy this file to config.yaml and edit locally.
+# Kill switch: enabled: false, or include "bypass jev" in the request state.
+enabled: true
+model: jev-latest
+
+# shadow logs advice; active requires the Grok Bot skill to honor route.action.
+mode: shadow  # shadow | active
+
+thresholds:
+  min_choice_confidence: 0.55
+  reuse_min: 0.65
+  subagent_min: 0.75
+
+limits:
+  max_browser_sources: 5
+  max_retries_same_error: 1
+
+logging:
+  path: logs/runs.jsonl

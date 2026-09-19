@@ -1,0 +1,119 @@
+{
+  "title": "Grok Bot alone vs Grok Bot + Jev usage A/B",
+  "date": "2026-09-19",
+  "grok_bot_meter": {
+    "type": "weekly_included_usage_percent",
+    "baseline_pct": 37,
+    "after_without_jev_pct": 38,
+    "after_with_jev_pct": 39,
+    "exact_tokens": null,
+    "exact_usd": null,
+    "limitation": "Grok Bot did not expose per-task token counts; the meter includes surrounding chat overhead."
+  },
+  "jev": {
+    "pricing_usd_per_mtok_input": 0.042,
+    "output_tokens_cost": 0,
+    "input_tokens_estimate": 4178,
+    "known_exact": {
+      "task2_news_triage_input_tokens": 2178
+    },
+    "recorded_cost_usd_estimate": 0.000175
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "name": "Flights search-only",
+      "without_jev": {
+        "browser_opens": 1,
+        "options": 3,
+        "retries": 0
+      },
+      "with_jev": {
+        "action": "reuse_cache",
+        "browser_opens": 0,
+        "jev_calls": 1,
+        "note": "reused Phase A artifact"
+      }
+    },
+    {
+      "id": 2,
+      "name": "News triage of 10 headlines",
+      "without_jev": {
+        "jev_calls": 0,
+        "headlines": 10
+      },
+      "with_jev": {
+        "method": "Jev system_one",
+        "jev_calls": 1,
+        "input_tokens": 2178,
+        "headlines": 10
+      }
+    },
+    {
+      "id": 3,
+      "name": "Skill selection before flight work",
+      "without_jev": {
+        "skills_loaded": 6
+      },
+      "with_jev": {
+        "skills_loaded": 3,
+        "jev_calls": 1
+      }
+    },
+    {
+      "id": 4,
+      "name": "Retry a failing host",
+      "without_jev": {
+        "same_approach_attempts": 3
+      },
+      "with_jev": {
+        "action": "stop_retry",
+        "same_approach_attempts_after_jev": 0,
+        "jev_calls": 1
+      }
+    },
+    {
+      "id": 5,
+      "name": "Research cheapest/best models for a website",
+      "without_jev": {
+        "pages_fetched": 10,
+        "web_searches": 5,
+        "jev_calls": 0
+      },
+      "with_jev": {
+        "pages_fetched": 4,
+        "web_searches": 2,
+        "jev_calls": 1,
+        "cap": 5
+      }
+    }
+  ],
+  "timing_comparison": {
+    "test": "Jev posts >=200k filter A/B",
+    "pool_n": 24,
+    "collect_seconds_shared_excluded": 104.5,
+    "without_jev": {
+      "wall_seconds": 53.803,
+      "pages_fetched": 14,
+      "web_searches": 2,
+      "hits_200k_plus": 10,
+      "jev_calls": 0
+    },
+    "with_jev": {
+      "wall_seconds": 4.125,
+      "pages_fetched": 5,
+      "web_searches": 0,
+      "jev_calls": 2,
+      "jev_input_tokens": 9647,
+      "jev_usd": 0.000405,
+      "hits_200k_plus": 5
+    },
+    "reported_speedup_x": 13.0,
+    "caveat": "The Jev arm fetched only the ranked top five; the smaller hit count is by design."
+  },
+  "caveats": [
+    "The flight comparison with Jev reused a cache and was not a cold second search.",
+    "Exact Grok Bot per-task tokens and exact Grok Bot dollar cost were unavailable.",
+    "This is a local proxy comparison, not a benchmark or guarantee."
+  ]
+}
