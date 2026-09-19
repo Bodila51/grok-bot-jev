@@ -7,10 +7,12 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "config.yaml"
+EXAMPLE_PATH = ROOT / "config.example.yaml"
 
 
 def load_config() -> dict[str, Any]:
-    data = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    path = CONFIG_PATH if CONFIG_PATH.exists() else EXAMPLE_PATH
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     data.setdefault("enabled", True)
     data.setdefault("mode", "shadow")
     data.setdefault("model", "jev-latest")

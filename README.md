@@ -18,12 +18,12 @@ A small classification call can prevent needless tool work. The router is intent
 ## Install
 
 ```bash
-git clone <your-fork-url> grok-bot-jev
+git clone https://github.com/Bodila51/grok-bot-jev.git
 cd grok-bot-jev
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp config.example.yaml config.yaml
-Set `TYPESAFE_API_KEY` in the process environment using your shell or secret manager.
+export TYPESAFE_API_KEY=...   # use your secret manager; do not commit the key
 ```
 
 Keep `config.yaml`, `.env`, and local logs uncommitted. `src/secrets.py` reads only `TYPESAFE_API_KEY` from the environment; it never reads a secrets file.
@@ -75,6 +75,10 @@ These are one local run's proxy measurements, not a benchmark or guarantee.
 - [TypeSafe documentation](https://docs.typesafe.ai)
 - [Grok Bot documentation](https://cursor.com/docs/grok-bot)
 - [Architecture notes](docs/architecture.md)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Bug and feature issue templates live under `.github/ISSUE_TEMPLATE`.
 
 ## License
 
