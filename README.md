@@ -9,6 +9,9 @@ This package is a small open-source reference implementation. It does not change
 Screen recording of Grok Bot + Jev in action:
 
 - [`media/jev-grok-bot-demo.mp4`](media/jev-grok-bot-demo.mp4)
+- [`media/jev-grok-bot-dashboard.png`](media/jev-grok-bot-dashboard.png) - dashboard still (ask / live result / Jev decision)
+
+![Grok Bot + Jev dashboard](media/jev-grok-bot-dashboard.png)
 
 ## What
 
