@@ -1,5 +1,6 @@
 # Media
 
-- `jev-grok-bot-demo.mp4` - screen recording: Grok Bot + Jev demo
+Visualization assets for Grok Bot + Jev at work:
 
-- `jev-grok-bot-dashboard.png` - still frame / dashboard of Grok Bot + Jev (flights, post filter, stop_retry)
+- `jev-grok-bot-demo.mp4`
+- `jev-grok-bot-dashboard.png`

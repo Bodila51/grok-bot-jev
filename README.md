@@ -4,9 +4,9 @@ Connect [TypeSafe Jev](https://docs.typesafe.ai) to Grok Bot as a cheap decision
 
 This package is a small open-source reference implementation. It does not change Grok Bot's foundation model and does not route Cursor models.
 
-## Demo
+## How it looks
 
-Screen recording of Grok Bot + Jev in action:
+Visualization of Grok Bot + Jev at work:
 
 - [`media/jev-grok-bot-demo.mp4`](media/jev-grok-bot-demo.mp4)
 
