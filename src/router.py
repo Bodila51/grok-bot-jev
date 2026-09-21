@@ -136,7 +136,9 @@ def route_task(state: dict[str, Any]) -> dict[str, Any]:
     elif jstate["has_cached_artifact"] and reuse_n >= float(thr.get("reuse_min", 0.65)):
         action = "reuse_cache"
         reason = f"reuse_cache noul={reuse_n:.2f}"
-    elif jstate["same_error_count"] >= int(limits.get("max_retries_same_error", 1)) and stop_n >= 0.55:
+    elif jstate["same_error_count"] >= int(limits.get("max_retries_same_error", 1)) and stop_n >= float(
+        thr.get("stop_retry_min", 0.55)
+    ):
         action = "stop_retry"
         reason = f"stop_retry noul={stop_n:.2f} same_error_count={jstate['same_error_count']}"
     elif intent.choice == "lookup" and float(intent.confidence) >= float(thr.get("min_choice_confidence", 0.55)):

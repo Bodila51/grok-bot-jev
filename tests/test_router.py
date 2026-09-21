@@ -2,6 +2,7 @@
 """Offline checks for route_task: no network, no log writes. Run: .venv/bin/python tests/test_router.py"""
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -56,6 +57,23 @@ class RouterTests(unittest.TestCase):
         state = {"goal": "send it", "kind": "account", "cached_artifact": True, "same_error_count": 3}
         out = self.route(state, result=fake_result("account", reuse=0.95, stop=0.9))
         self.assertEqual(out["action"], "ask_human")
+
+    def test_stop_retry_threshold_from_config(self):
+        state = {"goal": "retry scrape", "kind": "browser", "prior_error": "timeout", "same_error_count": 2}
+        result = fake_result("browser", stop=0.6)
+        self.assertEqual(self.route(state, result=result)["action"], "stop_retry")
+        strict = dict(CFG, thresholds={"stop_retry_min": 0.9})
+        with mock.patch.object(router, "load_config", return_value=strict):
+            self.assertNotEqual(self.route(state, result=result)["action"], "stop_retry")
+
+    def test_kill_switch_runs_without_sdk(self):
+        code = (
+            "import sys; sys.modules['typesafe_sdk'] = None; "
+            "import src.router as r; r.log_run = lambda *a, **k: None; "
+            "print(r.route_task({'goal': 'no jev, just answer'})['action'])"
+        )
+        proc = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(proc.stdout.strip(), "proceed_full", proc.stderr)
 
     def test_bypass_markers(self):
         cases = [
