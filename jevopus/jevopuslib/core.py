@@ -5,25 +5,31 @@ from pathlib import Path
 
 try:
     import yaml
-except ImportError:  # farm.py re-execs under the Jev venv; tolerate plain python for doctor
+except ImportError:  # jevopus.py re-execs under the Jev venv; tolerate plain python for doctor
     yaml = None
 
-FARM = Path(os.environ.get("FARM_HOME") or Path(__file__).resolve().parent.parent).resolve()
-DB = FARM / "farm.db"
-JOBS = FARM / "jobs"
-LOG = FARM / "logs" / "routing.jsonl"
-RECIPES = FARM / "recipes"
-CONFIG = FARM / "config.json"
-RENDER_PY = FARM / "tools" / "render-venv" / "bin" / "python"
+def env(name, default=None):
+    """JEVOPUS_<name>, falling back to the legacy FARM_<name> (pre-rename installs)."""
+    return os.environ.get("JEVOPUS_" + name) or os.environ.get("FARM_" + name) or default
+
+
+HOME = Path(env("HOME") or Path(__file__).resolve().parent.parent).resolve()
+DB = HOME / "jevopus.db"
+LEGACY_DB = HOME / "farm.db"  # pre-rename name; renamed to jevopus.db on first open
+JOBS = HOME / "jobs"
+LOG = HOME / "logs" / "routing.jsonl"
+RECIPES = HOME / "recipes"
+CONFIG = HOME / "config.json"
+RENDER_PY = HOME / "tools" / "render-venv" / "bin" / "python"
 SECRET_ENV_RE = re.compile(r"(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.I)
 LIMIT_RE = re.compile(r"rate.?limit|quota|usage limit|too many requests|\b429\b|insufficient_quota|limit reached", re.I)
 
 
 def jev_dir():
     """The Jev router repo (grok-bot-jev preferred, muse-jev-playbook compatible). Needs .venv."""
-    pinned = FARM / ".jev_dir"  # written by the installer
-    cands = [os.environ.get("FARM_JEV_DIR"), pinned.read_text().strip() if pinned.exists() else None, FARM.parent / "grok-bot-jev", "/workspace/grok-bot-jev",
-             FARM.parent / "muse-jev-playbook", "/workspace/muse-jev-playbook"]
+    pinned = HOME / ".jev_dir"  # written by the installer
+    cands = [env("JEV_DIR"), pinned.read_text().strip() if pinned.exists() else None, HOME.parent / "grok-bot-jev", "/workspace/grok-bot-jev",
+             HOME.parent / "muse-jev-playbook", "/workspace/muse-jev-playbook"]
     for c in cands:
         if c and (Path(c) / ".venv" / "bin" / "python").exists():
             return Path(c)
@@ -31,7 +37,7 @@ def jev_dir():
 
 
 DEFAULT_CONFIG = {
-    "_note": "Farm settings. Model descriptions are editable defaults (task fit), not benchmarks.",
+    "_note": "Jevopus settings. Model descriptions are editable defaults (task fit), not benchmarks.",
     "models": {
         "gpt-6-astra": {"cli": "codex", "tier": "volume",
                         "fit": "Fast general default: everyday coding, small scripts, edits, short well-specified tasks."},
@@ -40,7 +46,7 @@ DEFAULT_CONFIG = {
         "gpt-6-luna": {"cli": "codex", "tier": "volume",
                        "fit": "Cheaper volume work: research summaries, data cleanup, bulk drafts, routine checks."},
         "opus": {"cli": "claude", "tier": "strong",
-                 "fit": "Claude (optional seat): hard multi-file refactors and careful long reasoning."},
+                 "fit": "Claude Code: hard multi-file refactors and careful long reasoning."},
     },
     "default_model": "gpt-6-astra",
     "verify": {"max_fix_rounds": 1, "pass_min": 0.5},
@@ -102,6 +108,7 @@ def worker_env(seat):
     """Env for a worker CLI: no credentials of any kind (API keys, tokens), seat-specific config dir."""
     env = {k: v for k, v in os.environ.items() if not SECRET_ENV_RE.search(k)}
     env["CODEX_HOME" if seat["cli"] == "codex" else "CLAUDE_CONFIG_DIR"] = seat["home_dir"]
+    env["JEVOPUS_RENDER_PY"] = str(RENDER_PY)
     return env
 
 
@@ -134,16 +141,18 @@ CODEX_MODELS = "gpt-6-astra,gpt-6-sol,gpt-6-luna"
 
 
 def seeds():  # id, cli, home_dir, model, tier, enabled, auth, note, models  -- all DISABLED until setup-seat passes
-    s = FARM / "seats"
+    s = HOME / "seats"
     return [("codex-sub", "codex", str(s / "codex-sub/codex"), "gpt-6-astra", "volume", 0, "subscription",
-             "ChatGPT subscription; run: farm.py setup-seat codex-sub", CODEX_MODELS),
+             "ChatGPT subscription; run: jevopus.py setup-seat codex-sub", CODEX_MODELS),
             ("codex-1", "codex", str(s / "codex-1/codex"), "gpt-6-astra", "volume", 0, "api_key",
-             "OpenAI API key; run: farm.py setup-seat codex-api", CODEX_MODELS),
+             "OpenAI API key; run: jevopus.py setup-seat codex-api", CODEX_MODELS),
             ("claude-strong", "claude", str(s / "claude-strong/claude"), "opus", "strong", 0, "subscription",
-             "optional Claude; run: farm.py setup-seat claude-strong", "opus")]
+             "Claude Code; run: jevopus.py setup-seat claude-strong", "opus")]
 
 
 def db():
+    if not DB.exists() and LEGACY_DB.exists():
+        LEGACY_DB.rename(DB)
     c = sqlite3.connect(DB, timeout=30); c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
     have = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}

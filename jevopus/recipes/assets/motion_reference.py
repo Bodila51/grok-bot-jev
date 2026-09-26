@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reference motion renderer (from the Farm presentation job): offline Pillow+numpy frames piped to ffmpeg.
+"""Reference motion renderer (from the Jevopus presentation job): offline Pillow+numpy frames piped to ffmpeg.
 Adapt LINES / title / end card / timing. Output: $OUT_NAME (default video.mp4)."""
 
 import math
@@ -26,14 +26,14 @@ def _find_font():
 FONT_PATH = _find_font()
 
 LINES = [
-    "Runs Codex seats on its own computer · Claude optional",
+    "Runs Codex and Claude Code seats on its own computer",
     "Models: GPT-6 Astra · GPT-6 Sol · GPT-6 Luna",
-    "Jev decides: answer inline or send to the farm, and which seat",
+    "Jev decides: answer inline or send to Jevopus, and which seat",
     "One job per seat, isolated logins, no quota hopping",
     "Brings back compact results, not transcripts",
 ]
-END = "Farm — more model capacity, less chat noise"
-END_NAME = "Farm"
+END = "Jevopus — more model capacity, less chat noise"
+END_NAME = "Jevopus"
 END_TAGLINE = "— more model capacity, less chat noise"
 
 
@@ -254,8 +254,8 @@ def main():
     glow_a = glow_sprite((41, 143, 165), power=34)
     glow_b = glow_sprite((74, 65, 153), size=780, power=34)
     card = card_asset()
-    header = text_asset("Farm", font(123, 650), (238, 247, 247, 255))
-    title = text_asset("Multi-model worker farm", font(43, 400), (149, 170, 187, 255))
+    header = text_asset("Jevopus", font(123, 650), (238, 247, 247, 255))
+    title = text_asset("Multi-model worker seats", font(43, 400), (149, 170, 187, 255))
     line_assets = [text_asset(s, font(40, 430), (223, 232, 240, 255)) for s in LINES]
     end_name = text_asset(END_NAME, font(132, 650), (238, 246, 246, 255))
     tagline_font = font(64, 540)

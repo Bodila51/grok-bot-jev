@@ -2,7 +2,7 @@
 Code owns policy; Jev only judges. Never put secrets in state."""
 import re
 
-FARM_NOTE = ("Worker seats are separate headless coding agents (Codex/Claude Code) that run in their own job "
+WORKER_NOTE = ("Worker seats are separate headless coding agents (Codex/Claude Code) that run in their own job "
              "directory, can edit files and run commands, and cost a subscription session each. The dispatcher "
              "can instead answer directly or do a few tool calls itself.")
 IRREV_RE = re.compile(r"\b(send|e-?mail|post|publish|tweet|pay|purchase|buy|transfer|delete|remove|rm -rf|drop|"
@@ -19,7 +19,7 @@ def route_questions(job, models, recent, fail_info):
     from typesafe_sdk import Choice, Noul, Score
     state = {"job": {"goal": job["goal"][:1500], "constraints": job["constraints"] or "",
                      "done_when": job["done_when"] or "", "kind_hint": job["kind"] or "unknown"},
-             "farm": FARM_NOTE}
+             "workers": WORKER_NOTE}
     q = {
         "needs_farm": Noul(instructions=
             "Does `job` need a dedicated worker agent session (creating/editing files, running code, multi-step "

@@ -1,6 +1,6 @@
 {
   "name": "motion-video",
-  "description": "Short motion-design MP4 rendered offline with Pillow/numpy + ffmpeg (approach of the Farm presentation job)",
+  "description": "Short motion-design MP4 rendered offline with Pillow/numpy + ffmpeg (approach of the Jevopus presentation job)",
   "vars": {
     "title": {
       "default": null
@@ -19,7 +19,7 @@
   "model": "gpt-6-sol",
   "effort": "high",
   "goal": "Create a premium {seconds}-second motion-design video titled '{title}' presenting these lines: {lines}. End card tagline: '{tagline}'.",
-  "constraints": "Start from ./motion_reference.py (copied into this directory): adapt its LINES/title/end card/timing; keep the offline Pillow+numpy frame renderer piped to ffmpeg. Run it with the render venv python given in FARM_RENDER_PY or ../../tools/render-venv/bin/python. 1920x1080, 30 fps, h264, yuv420p, exactly {seconds}.0 s. Check every text line fits. Save 3 preview PNG frames in preview/. No network.",
+  "constraints": "Start from ./motion_reference.py (copied into this directory): adapt its LINES/title/end card/timing; keep the offline Pillow+numpy frame renderer piped to ffmpeg. Run it with the render venv python given in JEVOPUS_RENDER_PY or ../../tools/render-venv/bin/python. 1920x1080, 30 fps, h264, yuv420p, exactly {seconds}.0 s. Check every text line fits. Save 3 preview PNG frames in preview/. No network.",
   "done_when": "video.mp4 exists and ffprobe shows h264, yuv420p, 1920x1080, 30 fps, {seconds}.0 s; render.py and preview/*.png exist; all lines readable.",
   "tools": [
     "ffmpeg",

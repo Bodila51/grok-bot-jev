@@ -2,7 +2,7 @@
 import json, os, re, shutil, subprocess, sys, time, uuid
 from pathlib import Path
 from . import jev
-from .core import (JOBS, RECIPES, FARM, LIMIT_RE, band, config, db, enabled_models, err_sig, goal_hash, iso, log,
+from .core import (JOBS, RECIPES, HOME, LIMIT_RE, band, config, db, enabled_models, env, err_sig, goal_hash, iso, log,
                    now, playbook, record_decisions, refresh_seats, seat_event, worker_env)
 
 PROMPT = """You are a worker in a job directory (your current working directory). Do this job:
@@ -24,7 +24,7 @@ Fix what is missing so the deliverable fully satisfies DONE WHEN. Stay in this d
 # ---------- recipes ----------
 def load_recipe(name):
     p = RECIPES / f"{name}.json"
-    if not p.exists(): sys.exit(f"no recipe '{name}' (see: farm.py recipes)")
+    if not p.exists(): sys.exit(f"no recipe '{name}' (see: jevopus.py recipes)")
     return json.loads(p.read_text())
 
 
@@ -43,7 +43,7 @@ def check_tools(tools):
     miss = []
     for t in tools or []:
         if t == "render-venv":
-            if not (FARM / "tools/render-venv/bin/python").exists(): miss.append("render-venv (reinstall without --no-render)")
+            if not (HOME / "tools/render-venv/bin/python").exists(): miss.append("render-venv (reinstall without --no-render)")
         elif not shutil.which(t): miss.append(t)
     return miss
 
@@ -152,7 +152,7 @@ def cmd_route(a):
         if job["model_source"] == "pinned":
             if job["model"] not in avail: notes.append(f"UNAVAILABLE: pinned model {job['model']} not on an enabled seat")
         elif not models:
-            notes.append("UNAVAILABLE: no enabled seat/model (run farm.py doctor / setup-seat); job stays queued")
+            notes.append("UNAVAILABLE: no enabled seat/model (run jevopus.py doctor / setup-seat); job stays queued")
         elif len(models) == 1:
             model, msrc = next(iter(models)), "only"
         elif j.get("model") and j["model_conf"] >= float(th.get("min_choice_confidence", 0.55)):
@@ -164,7 +164,7 @@ def cmd_route(a):
         if model and msrc != "pinned": notes.append(f"model {model} ({msrc})")
     if irr and route == "farm":
         notes.append("GUARD: irreversible/external action suspected (p=%.2f) -> " % j["irreversible_p"]
-                     + ("confirmed by human" if job["confirmed"] else "REQUIRES --confirmed (farm.py confirm <id>)"))
+                     + ("confirmed by human" if job["confirmed"] else "REQUIRES --confirmed (jevopus.py confirm <id>)"))
     if not jev_used: notes.append(f"jev not used ({err or 'error'}) -> fallback rule")
     note = "; ".join(notes)
     c.execute("UPDATE jobs SET route=?, tier=?, route_note=?, status=?, model=?, model_source=?, requires_confirm=?, "
@@ -186,7 +186,7 @@ def cmd_tick(a):
     c = db(); refresh_seats(c); n = 0
     for job in c.execute("SELECT * FROM jobs WHERE status='queued' AND route='farm' ORDER BY created_at").fetchall():
         if job["requires_confirm"] and not job["confirmed"]:
-            print(f"{job['id']}: waiting for human confirmation (farm.py confirm {job['id']})"); continue
+            print(f"{job['id']}: waiting for human confirmation (jevopus.py confirm {job['id']})"); continue
         q = "SELECT * FROM seats WHERE enabled=1 AND status='idle' AND (cooldown_until IS NULL OR cooldown_until<?)"
         seats = c.execute(q, (now(),)).fetchall()
         if job["pin_seat"]: seats = [s for s in seats if s["id"] == job["pin_seat"]]  # never another login
@@ -263,7 +263,7 @@ def cmd_run(a):
         if src.exists(): shutil.copy(src, jdir / src.name)
     prompt = PROMPT.format(goal=job["goal"], constraints=job["constraints"] or "none", done_when=job["done_when"] or "goal met")
     model, env, cli_cfg = job["model"] or seat["model"], worker_env(seat), json.loads(job["cli_config"] or "[]")
-    timeout = int(os.environ.get("FARM_RUN_TIMEOUT", cfg["run_timeout_sec"]))
+    timeout = int(env("RUN_TIMEOUT", cfg["run_timeout_sec"]))
     c.execute("UPDATE jobs SET status='running', prompt=?, model=?, started_at=? WHERE id=?", (prompt, model, iso(), job["id"])); c.commit()
     t0 = now(); print(f"running {job['id']} on {seat['id']} ({seat['cli']} {model})...", flush=True)
     out, rc = _exec(_argv(seat, model, job["effort"], prompt, cli_cfg), jdir, env, timeout)

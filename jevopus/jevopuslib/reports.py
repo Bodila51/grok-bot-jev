@@ -77,7 +77,7 @@ def job_outcome(j):
 def cmd_weekly(a):
     c = db(); since = _since("7d"); pb = playbook()
     jobs = c.execute("SELECT * FROM jobs WHERE created_at>=?", (since,)).fetchall()
-    print(f"WEEKLY FARM REPORT (last 7 days, {len(jobs)} jobs)")
+    print(f"WEEKLY JEVOPUS REPORT (last 7 days, {len(jobs)} jobs)")
     for label, key in (("route", "route"), ("tier", "tier"), ("model", "model"), ("status", "status")):
         cnt = Counter(j[key] or "-" for j in jobs)
         print(f"  by {label:6}: " + ", ".join(f"{k}={v}" for k, v in cnt.most_common()))

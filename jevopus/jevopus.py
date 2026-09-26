@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
-"""Farm v2: worker-farm router. Jev (TypeSafe) judges; code owns leases, runs, policy. Secrets never printed.
+"""Jevopus v2 (formerly Farm): worker router. Jev (TypeSafe) judges; code owns leases, runs, policy. Secrets never printed.
 
-  farm.py submit --goal G [--constraints C] [--done-when D] [--kind K] [--model M] [--effort E] [--seat S]
+  jevopus.py submit --goal G [--constraints C] [--done-when D] [--kind K] [--model M] [--effort E] [--seat S]
                  [--recipe NAME --var k=v ...] [--from-agent NAME] [--confirmed] [--force]
-  farm.py route <id> | tick | run <id> | confirm <id> | cancel <id> | status
-  farm.py report <id> | usage [--since 7d] | weekly | feedback <id> ok|wrong [note]
-  farm.py recipes | doctor | setup-seat codex-sub|codex-api|claude-strong [--disable] | init
+  jevopus.py route <id> | tick | run <id> | confirm <id> | cancel <id> | status
+  jevopus.py report <id> | usage [--since 7d] | weekly | feedback <id> ok|wrong [note]
+  jevopus.py recipes | doctor | setup-seat codex-sub|codex-api|claude-strong [--disable] | init
 """
 import argparse, os, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from farmlib.core import jev_dir  # noqa: E402  (stdlib-only import, safe before re-exec)
+from jevopuslib.core import jev_dir  # noqa: E402  (stdlib-only import, safe before re-exec)
 
 try:
     import yaml, typesafe_sdk  # noqa: F401
 except ImportError:  # re-exec under the Jev router venv (typesafe-sdk + pyyaml)
     d = jev_dir(); vpy = str(d / ".venv/bin/python") if d else None
-    if vpy and os.path.realpath(sys.prefix) != os.path.realpath(str(d / ".venv")) and not os.environ.get("FARM_NO_REEXEC"):
-        os.environ["FARM_NO_REEXEC"] = "1"; os.execv(vpy, [vpy, *sys.argv])
+    if vpy and os.path.realpath(sys.prefix) != os.path.realpath(str(d / ".venv")) and not (os.environ.get("JEVOPUS_NO_REEXEC") or os.environ.get("FARM_NO_REEXEC")):
+        os.environ["JEVOPUS_NO_REEXEC"] = "1"; os.execv(vpy, [vpy, *sys.argv])
     if len(sys.argv) < 2 or sys.argv[1] not in ("doctor", "init", "status", "recipes"):
-        sys.exit("Jev router venv not found (need grok-bot-jev/.venv with typesafe-sdk). Run farm_install.sh or farm.py doctor.")
+        sys.exit("Jev router venv not found (need grok-bot-jev/.venv with typesafe-sdk). Run jevopus_install.sh or jevopus.py doctor.")
 
-from farmlib import reports, runner, setup  # noqa: E402
-from farmlib.core import DB, db  # noqa: E402
+from jevopuslib import reports, runner, setup  # noqa: E402
+from jevopuslib.core import DB, db  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Farm worker router (v2)"); sp = ap.add_subparsers(dest="cmd", required=True)
+    ap = argparse.ArgumentParser(description="Jevopus worker router (v2)"); sp = ap.add_subparsers(dest="cmd", required=True)
     for n in ("init", "tick", "status", "weekly", "recipes", "doctor"): sp.add_parser(n)
     s = sp.add_parser("submit")
     s.add_argument("--goal", default=""); s.add_argument("--constraints", default=""); s.add_argument("--done-when", default="")
