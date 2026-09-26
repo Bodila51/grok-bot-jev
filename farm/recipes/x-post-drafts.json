@@ -1,0 +1,18 @@
+{
+  "name": "x-post-drafts",
+  "description": "5 X/Twitter post drafts in the user's voice from a topic (drafts only, never posted)",
+  "vars": {
+    "topic": {
+      "default": null
+    },
+    "voice": {
+      "default": "direct, concise, first person, no hype, no hashtags spam"
+    }
+  },
+  "kind": "write",
+  "model": "gpt-6-luna",
+  "goal": "Write 5 X post drafts about: {topic}. Voice: {voice}.",
+  "constraints": "Drafts only: do NOT post, schedule, or contact anyone; no credentials are available. Each draft <= 280 characters, distinct angle, no invented facts or stats. Write drafts.md with the 5 numbered drafts and their character counts.",
+  "done_when": "drafts.md contains exactly 5 numbered drafts, each <= 280 characters with its count, all on the topic and in the requested voice.",
+  "tools": []
+}

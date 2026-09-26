@@ -1,0 +1,20 @@
+{
+  "name": "code-review",
+  "description": "Read-only code review of a repo path with prioritized findings",
+  "vars": {
+    "repo": {
+      "default": null
+    },
+    "focus": {
+      "default": "bugs, security, maintainability"
+    }
+  },
+  "kind": "coding",
+  "model": "gpt-6-astra",
+  "goal": "Review the code in {repo} (read only). Focus: {focus}.",
+  "constraints": "Do not modify anything under {repo}; you may only read it. Write review.md in the job directory: summary, then findings ordered by severity (file:line, problem, suggested fix). Max 25 findings. Never copy secrets you find; just flag their location.",
+  "done_when": "review.md exists with a summary and severity-ordered findings that reference real files/lines in {repo}.",
+  "tools": [
+    "git"
+  ]
+}

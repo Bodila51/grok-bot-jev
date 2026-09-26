@@ -1,0 +1,20 @@
+{
+  "name": "data-cleanup",
+  "description": "Clean a CSV: dedupe, normalize, fix types; outputs cleaned CSV + report",
+  "vars": {
+    "input": {
+      "default": null
+    },
+    "rules": {
+      "default": "trim whitespace, dedupe exact rows, normalize dates to ISO-8601, fix obvious type errors"
+    }
+  },
+  "kind": "coding",
+  "model": "gpt-6-luna",
+  "goal": "Clean the CSV at {input}. Rules: {rules}.",
+  "constraints": "Read {input} but never modify it. Write clean.py (python3 stdlib csv only), cleaned.csv and cleanup_report.md (rows in/out, what changed, rows dropped and why) in the job directory.",
+  "done_when": "cleaned.csv and cleanup_report.md exist, clean.py reproduces cleaned.csv from {input}, and the report's row counts match.",
+  "tools": [
+    "python3"
+  ]
+}

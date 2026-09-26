@@ -1,0 +1,21 @@
+{
+  "name": "research-brief",
+  "description": "Short research brief with N sources, a comparison table and citations",
+  "vars": {
+    "topic": {
+      "default": null
+    },
+    "n": {
+      "default": "5"
+    }
+  },
+  "kind": "research",
+  "model": "gpt-6-luna",
+  "goal": "Write a research brief on: {topic}. Use exactly {n} distinct, reputable sources.",
+  "constraints": "Use web search. Cite every factual claim inline as [n] with a numbered source list (title, URL, date accessed). No paywalled or invented sources. Output brief.md only.",
+  "done_when": "brief.md exists with a 3-5 sentence summary, a markdown comparison table, {n} numbered sources with URLs, and inline [n] citations.",
+  "tools": [],
+  "codex_config": [
+    "web_search=\"live\""
+  ]
+}
