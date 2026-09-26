@@ -94,7 +94,7 @@ echo "config: $JEVOPUS_JEV_DIR/config.yaml ($(grep -E '^mode:' "$JEVOPUS_JEV_DIR
 # ---------- 4. Jevopus files ----------
 say "4/7 Jevopus files -> $JEVOPUS_HOME"
 mkdir -p "$JEVOPUS_HOME"/{jobs,logs,seats,tools}
-[ "$(cd "$JEVOPUS_HOME" && pwd)" = "$SRC_DIR" ] || (cd "$SRC_DIR" && tar -cf - jevopus.py README.md tools/resume_fix.sh jevopuslib/__init__.py jevopuslib/core.py jevopuslib/jev.py jevopuslib/reports.py jevopuslib/runner.py jevopuslib/setup.py recipes/assets/motion_reference.py recipes/code-review.json recipes/data-cleanup.json recipes/landing-page.json recipes/motion-video.json recipes/research-brief.json recipes/x-post-drafts.json | tar -xf - -C "$JEVOPUS_HOME") || die "copy failed"
+[ "$(cd "$JEVOPUS_HOME" && pwd)" = "$SRC_DIR" ] || (cd "$SRC_DIR" && tar -cf - jevopus.py README.md tools/resume_fix.sh jevopuslib/__init__.py jevopuslib/core.py jevopuslib/evidence.py jevopuslib/jev.py jevopuslib/reports.py jevopuslib/runner.py jevopuslib/setup.py recipes/assets/motion_reference.py recipes/code-review.json recipes/data-cleanup.json recipes/landing-page.json recipes/motion-video.json recipes/research-brief.json recipes/x-post-drafts.json | tar -xf - -C "$JEVOPUS_HOME") || die "copy failed"
 chmod +x "$JEVOPUS_HOME/jevopus.py" "$JEVOPUS_HOME/tools/resume_fix.sh"
 echo "$JEVOPUS_JEV_DIR" > "$JEVOPUS_HOME/.jev_dir"
 echo "installed Jevopus v2.0.20260926 ($(find "$JEVOPUS_HOME/jevopuslib" "$JEVOPUS_HOME/recipes" -type f | wc -l) lib/recipe files); config.json, jevopus.db, jobs/ and seats/ are kept"

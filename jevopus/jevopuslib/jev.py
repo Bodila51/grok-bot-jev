@@ -14,8 +14,9 @@ def _client(pb):
     return TypeSafeClient(model=pb.get("model") or "jev-latest")
 
 
-def route_questions(job, models, recent, fail_info):
-    """Build state + questions for the routing call. models: {name: fit}; recent: [(id, goal)]."""
+def route_questions(job, models, recent, fail_info, evidence=None):
+    """Build state + questions for the routing call. models: {name: fit}; recent: [(id, goal)];
+    evidence: {model: one-line past-outcome summary} (see evidence.py)."""
     from typesafe_sdk import Choice, Noul, Score
     state = {"job": {"goal": job["goal"][:1500], "constraints": job["constraints"] or "",
                      "done_when": job["done_when"] or "", "kind_hint": job["kind"] or "unknown"},
@@ -41,8 +42,14 @@ def route_questions(job, models, recent, fail_info):
     }
     if len(models) > 1:
         state["models"] = models
-        q["model"] = Choice(instructions="Which worker model in `models` fits `job` best? Each option describes "
-                                         "the kind of work it suits.", criteria=dict(models))
+        instr = "Which worker model in `models` fits `job` best? Each option describes the kind of work it suits."
+        if evidence:
+            state["model_history"] = {m: evidence.get(m, "no past jobs") for m in models}
+            instr += (" `model_history` lists real outcomes of earlier jobs on each model (verified pass / fail / "
+                      "needs review, plus user feedback), similar jobs first, then all jobs. When a model has at least "
+                      "3 past outcomes, weigh those real results more than its description; with fewer samples treat "
+                      "them as weak hints. A model with no history is not worse, just unknown.")
+        q["model"] = Choice(instructions=instr, criteria=dict(models))
     if recent:
         state["recent_done_jobs"] = {jid: g[:200] for jid, g in recent}
         crit = {jid: f"Earlier finished job with the same deliverable: {g[:200]}" for jid, g in recent}
@@ -57,8 +64,8 @@ def route_questions(job, models, recent, fail_info):
     return state, q
 
 
-def ask_route(pb, job, models, recent, fail_info):
-    state, q = route_questions(job, models, recent, fail_info)
+def ask_route(pb, job, models, recent, fail_info, evidence=None):
+    state, q = route_questions(job, models, recent, fail_info, evidence)
     with _client(pb) as c:
         r = c.system_one(state=state, questions=q)
     out = {"needs_farm_p": round(float(r.nouls["needs_farm"].noul), 3),

@@ -45,8 +45,12 @@ DEFAULT_CONFIG = {
                       "fit": "Best for creative, visual and long craft work: design, motion/video, polished writing, larger builds."},
         "gpt-6-luna": {"cli": "codex", "tier": "volume",
                        "fit": "Cheaper volume work: research summaries, data cleanup, bulk drafts, routine checks."},
-        "opus": {"cli": "claude", "tier": "strong",
+        "opus": {"cli": "claude", "tier": "strong", "id": "claude-opus (CLI alias opus)",
                  "fit": "Claude Code: hard multi-file refactors and careful long reasoning."},
+        "sonnet": {"cli": "claude", "tier": "strong", "id": "claude-sonnet-5 (CLI alias sonnet)",
+                   "fit": "Claude Code, balanced: everyday and mid-size coding, multi-step edits, solid writing; faster and lighter than Opus."},
+        "haiku": {"cli": "claude", "tier": "volume", "id": "claude-haiku-4-5 (CLI alias haiku)",
+                  "fit": "Claude Code, fast and light: small edits, quick scripts, summaries, bulk routine checks; weaker on hard reasoning."},
     },
     "default_model": "gpt-6-astra",
     "verify": {"max_fix_rounds": 1, "pass_min": 0.5},
@@ -58,17 +62,38 @@ DEFAULT_CONFIG = {
 }
 
 
+def merge_models(user_models):
+    """Add default models (and missing fields of known models) without overwriting any user-edited value."""
+    out = {m: dict(v) for m, v in (user_models or {}).items()}
+    for m, dv in DEFAULT_CONFIG["models"].items():
+        if m not in out: out[m] = dict(dv)
+        elif isinstance(out[m], dict):
+            for f, fv in dv.items(): out[m].setdefault(f, fv)
+    return out
+
+
 def config():
     if not CONFIG.exists():
         CONFIG.write_text(json.dumps(DEFAULT_CONFIG, indent=2) + "\n")
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
     try:
         user = json.loads(CONFIG.read_text())
+        if isinstance(user.get("models"), dict):
+            merged = merge_models(user["models"])
+            if merged != user["models"]:  # upgrade: persist new default models/fields, keep user edits
+                user["models"] = merged
+                try: CONFIG.write_text(json.dumps(user, indent=2, ensure_ascii=False) + "\n")
+                except OSError: pass
         for k, v in user.items():
             cfg[k] = {**cfg[k], **v} if isinstance(v, dict) and isinstance(cfg.get(k), dict) and k != "models" else v
     except Exception as e:
         print(f"warning: config.json unreadable ({e}); using defaults")
     return cfg
+
+
+def cli_model(cfg, model):
+    """Name passed to the worker CLI (--model / -m): config `cli_model` override, else the model key (claude aliases)."""
+    return (cfg["models"].get(model) or {}).get("cli_model") or model
 
 
 def playbook():
@@ -124,7 +149,7 @@ JOB_COLS = {  # added columns (idempotent ALTERs)
     "session_id": "TEXT", "verify_p": "REAL", "verify_status": "TEXT", "fix_rounds": "INTEGER DEFAULT 0",
     "goal_hash": "TEXT", "err_sig": "TEXT", "requires_confirm": "INTEGER DEFAULT 0", "confirmed": "INTEGER DEFAULT 0",
     "from_agent": "TEXT", "recipe": "TEXT", "recipe_vars": "TEXT", "cached_from": "TEXT", "forced": "INTEGER DEFAULT 0",
-    "cli_config": "TEXT", "attach": "TEXT", "feedback": "TEXT", "feedback_note": "TEXT"}
+    "cli_config": "TEXT", "attach": "TEXT", "feedback": "TEXT", "feedback_note": "TEXT", "model_evidence": "TEXT"}
 SCHEMA = JOBS_DDL + """;
 CREATE TABLE IF NOT EXISTS seats(
   id TEXT PRIMARY KEY, cli TEXT, home_dir TEXT, model TEXT,
@@ -138,6 +163,7 @@ CREATE TABLE IF NOT EXISTS seat_events(ts TEXT, epoch REAL, seat_id TEXT, event 
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 """
 CODEX_MODELS = "gpt-6-astra,gpt-6-sol,gpt-6-luna"
+CLAUDE_MODELS = "opus,sonnet,haiku"  # claude CLI aliases
 
 
 def seeds():  # id, cli, home_dir, model, tier, enabled, auth, note, models  -- all DISABLED until setup-seat passes
@@ -147,7 +173,7 @@ def seeds():  # id, cli, home_dir, model, tier, enabled, auth, note, models  -- 
             ("codex-1", "codex", str(s / "codex-1/codex"), "gpt-6-astra", "volume", 0, "api_key",
              "OpenAI API key; run: jevopus.py setup-seat codex-api", CODEX_MODELS),
             ("claude-strong", "claude", str(s / "claude-strong/claude"), "opus", "strong", 0, "subscription",
-             "Claude Code; run: jevopus.py setup-seat claude-strong", "opus")]
+             "Claude Code; run: jevopus.py setup-seat claude-strong", CLAUDE_MODELS)]
 
 
 def db():
@@ -162,6 +188,12 @@ def db():
         c.execute("ALTER TABLE seats ADD COLUMN models TEXT")
     c.execute("UPDATE seats SET models=? WHERE models IS NULL AND cli='codex'", (CODEX_MODELS,))
     c.execute("UPDATE seats SET models=model WHERE models IS NULL")
+    for s in c.execute("SELECT id, models FROM seats WHERE cli='claude'").fetchall():  # upgrade: offer new claude models
+        have_m = [m for m in (s["models"] or "").split(",") if m]
+        new = have_m + [m for m in CLAUDE_MODELS.split(",") if m not in have_m]
+        if new != have_m: c.execute("UPDATE seats SET models=? WHERE id=?", (",".join(new), s["id"]))
+    if "evidence" not in {r[1] for r in c.execute("PRAGMA table_info(decisions)")}:
+        c.execute("ALTER TABLE decisions ADD COLUMN evidence TEXT")
     sql = c.execute("SELECT sql FROM sqlite_master WHERE name='jobs'").fetchone()[0]
     if "needs_review" not in sql:  # widen the status CHECK: rebuild table once (v1 -> v2)
         cols = ",".join(r[1] for r in c.execute("PRAGMA table_info(jobs)"))
@@ -182,10 +214,10 @@ def seat_event(c, seat_id, event, job_id="", note=""):
 
 
 def record_decisions(c, job_id, items, jev_used):
-    """items: list of (kind, answer, conf, band, applied)."""
-    for k, a, conf, b, ap in items:
-        c.execute("INSERT INTO decisions(ts,job_id,kind,answer,conf,band,applied,jev_used) VALUES(?,?,?,?,?,?,?,?)",
-                  (iso(), job_id, k, str(a), conf, b, int(bool(ap)), int(bool(jev_used))))
+    """items: list of (kind, answer, conf, band, applied[, evidence])."""
+    for k, a, conf, b, ap, *ev in items:
+        c.execute("INSERT INTO decisions(ts,job_id,kind,answer,conf,band,applied,jev_used,evidence) VALUES(?,?,?,?,?,?,?,?,?)",
+                  (iso(), job_id, k, str(a), conf, b, int(bool(ap)), int(bool(jev_used)), ev[0] if ev else None))
 
 
 def refresh_seats(c):

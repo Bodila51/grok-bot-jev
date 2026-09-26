@@ -23,7 +23,7 @@ except ImportError:  # re-exec under the Jev router venv (typesafe-sdk + pyyaml)
         sys.exit("Jev router venv not found (need grok-bot-jev/.venv with typesafe-sdk). Run jevopus_install.sh or jevopus.py doctor.")
 
 from jevopuslib import reports, runner, setup  # noqa: E402
-from jevopuslib.core import DB, db  # noqa: E402
+from jevopuslib.core import DB, config, db  # noqa: E402
 
 
 def main():
@@ -44,7 +44,7 @@ def main():
     f = sp.add_parser("feedback"); f.add_argument("job_id"); f.add_argument("verdict", choices=["ok", "wrong"]); f.add_argument("note", nargs="*")
     ss = sp.add_parser("setup-seat"); ss.add_argument("seat"); ss.add_argument("--disable", action="store_true")
     a = ap.parse_args()
-    {"init": lambda a: (db(), print(f"db ready: {DB}")), "submit": runner.cmd_submit, "route": runner.cmd_route,
+    {"init": lambda a: (db(), config(), print(f"db ready: {DB}; config: {len(config()['models'])} models")), "submit": runner.cmd_submit, "route": runner.cmd_route,
      "tick": runner.cmd_tick, "run": runner.cmd_run, "confirm": runner.cmd_confirm, "cancel": runner.cmd_cancel, "status": reports.cmd_status,
      "report": reports.cmd_report, "usage": reports.cmd_usage, "weekly": reports.cmd_weekly,
      "feedback": reports.cmd_feedback, "recipes": reports.cmd_recipes, "doctor": setup.cmd_doctor,

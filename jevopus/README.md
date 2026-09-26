@@ -40,9 +40,22 @@ Typical flow: `id=$(jevopus.py submit ...) && jevopus.py route $id && jevopus.py
 ## Decisions (Jev) and policy
 - Thresholds from the Jev repo `config.yaml` (`policy.act_min` 0.80 / `surface_min` 0.50; `thresholds.reuse_min`,
   `min_choice_confidence`, `stop_retry_min`; `limits.max_retries_same_error`). Noul confidence = max(p, 1-p).
-- **Model selection**: if no `--model`, Jev Choice among models on ENABLED seats (Codex and/or Claude Code), using
-  the task-fit text in `config.json` → `models` (editable defaults, not benchmarks). Below `min_choice_confidence`
-  → `default_model`.
+- **Model selection** (how a model is chosen, in order):
+  1. **Pins win**: `--model M` is used as-is; `--seat S` limits candidates to that seat's models.
+  2. **Candidates** = models offered by ENABLED seats that appear in `config.json` → `models`. One candidate → used.
+  3. **Jev Choice** sees, per candidate, the **fit text** (editable defaults, not benchmarks) and a compact
+     **history** block built from `jevopus.db`: verified pass / fail / needs-review counts and your `feedback`
+     ok/wrong counts, first on *similar* jobs (same recipe; without a recipe: same kind + ≥2 shared goal keywords),
+     then on all jobs, plus up to 2 short redacted goal snippets. Jev is told to weigh real outcomes over
+     descriptions once a model has ≥3 outcomes and to treat fewer as weak hints; models with no history are
+     "unknown", not worse. No prompts, logs or results of other jobs are sent.
+  4. **Thresholds**: Jev's pick is applied only if confidence ≥ `min_choice_confidence`; otherwise `default_model`.
+  The evidence is stored with the job (`model_evidence`, and on the `model` decision) and shown by
+  `jevopus.py report <id>` as `model evidence`. `feedback <id> ok|wrong` directly improves future picks.
+- **Models** (defaults, merged into existing `config.json` on upgrade without touching your edits): Codex
+  `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`; Claude Code `opus`, `sonnet` (claude-sonnet-5), `haiku`
+  (claude-haiku-4-5). Claude models are passed to `claude --model` as CLI aliases (override per model with
+  `"cli_model"`); the `claude-strong` seat offers all three.
 - **Reuse/cache**: Jev Choice over the last 20 done+verified jobs (+ "none"); conf ≥ `reuse_min` → job becomes
   `cached` and points at the earlier result. `--force` skips this.
 - **Stop-retry**: failures are tracked per goal hash + error signature; after `max_retries_same_error` identical
@@ -102,5 +115,5 @@ renamed to `jevopus.db` on first use.
 ## Files
 `jevopus.py` (CLI) · `jevopuslib/core.py` (paths, config, db + idempotent migrations) · `jevopuslib/jev.py` (all
 Jev calls + fallbacks) · `jevopuslib/runner.py` (submit/route/tick/run/verify) · `jevopuslib/reports.py` ·
-`jevopuslib/setup.py` (doctor, setup-seat) · `config.json` (created on first run; models table etc.) · `recipes/` ·
+`jevopuslib/evidence.py` (model history for Jev) · `jevopuslib/setup.py` (doctor, setup-seat) · `config.json` (created on first run; models table etc.) · `recipes/` ·
 `tools/resume_fix.sh` (manual follow-up on a codex session) · `tools/render-venv` (Pillow, numpy, pycairo; optional).

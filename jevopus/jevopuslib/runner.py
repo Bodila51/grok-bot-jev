@@ -1,8 +1,8 @@
 """submit / route / tick / run (+ Jev verification and fix rounds) / confirm."""
 import json, os, re, shutil, subprocess, sys, time, uuid
 from pathlib import Path
-from . import jev
-from .core import (JOBS, RECIPES, HOME, LIMIT_RE, band, config, db, enabled_models, env, err_sig, goal_hash, iso, log,
+from . import evidence as ev_mod, jev
+from .core import (JOBS, RECIPES, HOME, LIMIT_RE, band, cli_model, config, db, enabled_models, env, err_sig, goal_hash, iso, log,
                    now, playbook, record_decisions, refresh_seats, seat_event, worker_env)
 
 PROMPT = """You are a worker in a job directory (your current working directory). Do this job:
@@ -117,11 +117,12 @@ def cmd_route(a):
         "AND (verify_status IS NULL OR verify_status='pass') ORDER BY created_at DESC LIMIT ?",
         (job["id"], int(cfg["reuse"]["candidates"])))]
     fail = _fail_info(c, job, pb)
+    evid = ev_mod.build(c, job, models) if models and job["model_source"] != "pinned" else None
     kill = not pb.get("enabled", True) or re.search(r"\b(bypass jev|no jev)\b", job["goal"], re.I)
     err = ""
     if kill: j, jev_used, err = jev.fallback_route(job, models, recent, fail), False, "kill switch"
     else:
-        try: j, jev_used = jev.ask_route(pb, job, models, recent, fail), True
+        try: j, jev_used = jev.ask_route(pb, job, models, recent, fail, evid and evid["lines"]), True
         except Exception as e:
             j, jev_used, err = jev.fallback_route(job, models, recent, fail), False, f"{type(e).__name__}: {str(e)[:200]}"
     farm_conf = max(j["needs_farm_p"], 1 - j["needs_farm_p"])
@@ -160,7 +161,8 @@ def cmd_route(a):
         else:
             model = cfg["default_model"] if cfg["default_model"] in models else next(iter(models)); msrc = "default"
         if "model" in j:
-            dec.append(("model", j["model"], j["model_conf"], band(j["model_conf"] or 0, pol), msrc == "jev"))
+            dec.append(("model", j["model"], j["model_conf"], band(j["model_conf"] or 0, pol), msrc == "jev",
+                        evid and evid["summary"]))
         if model and msrc != "pinned": notes.append(f"model {model} ({msrc})")
     if irr and route == "farm":
         notes.append("GUARD: irreversible/external action suspected (p=%.2f) -> " % j["irreversible_p"]
@@ -168,13 +170,15 @@ def cmd_route(a):
     if not jev_used: notes.append(f"jev not used ({err or 'error'}) -> fallback rule")
     note = "; ".join(notes)
     c.execute("UPDATE jobs SET route=?, tier=?, route_note=?, status=?, model=?, model_source=?, requires_confirm=?, "
-              "cached_from=?, result_path=COALESCE(?, result_path) WHERE id=?",
-              (route, tier, note, status, model, msrc, int(irr), cached_from, result_path, job["id"]))
+              "cached_from=?, result_path=COALESCE(?, result_path), model_evidence=? WHERE id=?",
+              (route, tier, note, status, model, msrc, int(irr), cached_from, result_path,
+               json.dumps(evid, ensure_ascii=False) if evid else None, job["id"]))
     c.execute("DELETE FROM decisions WHERE job_id=? AND kind!='verify'", (job["id"],))
     record_decisions(c, job["id"], dec, jev_used); c.commit()
     out = {"job_id": job["id"], "goal": job["goal"][:300], "kind": job["kind"], "jev_used": jev_used, "jev": j,
            "bands": {"farm": fb, "tier": tb}, "route": route, "tier": tier, "model": model, "model_source": msrc,
-           "requires_confirm": irr, "status": status, "note": note, "latency_ms": int((now() - t0) * 1000)}
+           "requires_confirm": irr, "status": status, "note": note,
+           "model_evidence": evid and {"basis": evid["basis"], "lines": evid["lines"]}, "latency_ms": int((now() - t0) * 1000)}
     if err: out["error"] = err
     log({"event": "route", **out}); print(json.dumps(out, indent=2))
     if reuse_hit and result_path and Path(result_path).exists():
@@ -266,7 +270,7 @@ def cmd_run(a):
     timeout = int(env("RUN_TIMEOUT", cfg["run_timeout_sec"]))
     c.execute("UPDATE jobs SET status='running', prompt=?, model=?, started_at=? WHERE id=?", (prompt, model, iso(), job["id"])); c.commit()
     t0 = now(); print(f"running {job['id']} on {seat['id']} ({seat['cli']} {model})...", flush=True)
-    out, rc = _exec(_argv(seat, model, job["effort"], prompt, cli_cfg), jdir, env, timeout)
+    out, rc = _exec(_argv(seat, cli_model(cfg, model), job["effort"], prompt, cli_cfg), jdir, env, timeout)
     (jdir / "worker.log").write_text(out)
     tokens, sid = parse_usage(out)
     res = _read_result(jdir)
@@ -288,7 +292,7 @@ def cmd_run(a):
             rounds += 1
             fix = FIX_PROMPT.format(p=vp, done_when=job["done_when"] or "goal met",
                                     issues="; ".join(res.get("open_issues") or []) or "none listed")
-            out2, rc = _exec(_argv(seat, model, job["effort"], fix, cli_cfg, session=sid), jdir, env, timeout)
+            out2, rc = _exec(_argv(seat, cli_model(cfg, model), job["effort"], fix, cli_cfg, session=sid), jdir, env, timeout)
             (jdir / f"worker_fix{rounds}.log").write_text(out2); t2, _ = parse_usage(out2); tokens += t2
             log({"event": "run_fix", "job_id": job["id"], "seat": seat["id"], "model": model, "session": sid, "rc": rc, "round": rounds})
             if rc != 0 and LIMIT_RE.search(out2):

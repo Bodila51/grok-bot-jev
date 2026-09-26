@@ -42,6 +42,13 @@ def cmd_report(a):
         print(f"  {d['kind']:11} {d['answer']:<22} conf={d['conf'] if d['conf'] is not None else '-':<6} {d['band'] or '':9} "
               f"{'applied' if d['applied'] else 'advice'}{'' if d['jev_used'] else ' (fallback)'}")
     print(f"note: {j['route_note'] or '-'}")
+    try: ev = json.loads(j["model_evidence"]) if j["model_evidence"] else None
+    except Exception: ev = None
+    if ev:
+        print(f"model evidence ({ev.get('basis')}):")
+        for m, line in (ev.get("lines") or {}).items(): print(f"  {m:12} {line}")
+    else:
+        print("model evidence: - (" + ("model pinned" if j["model_source"] == "pinned" else "routed before evidence existed / no candidate models") + ")")
     if j["feedback"]: print(f"feedback: {j['feedback']} {j['feedback_note'] or ''}")
     rp = Path(j["result_path"]) if j["result_path"] else jdir / "result.json"
     try:
