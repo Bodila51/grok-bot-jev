@@ -1,0 +1,21 @@
+{
+  "name": "competitor-analysis",
+  "description": "Compare given competitors (positioning, offer, public pricing, strengths/weaknesses, gaps) with cited sources",
+  "vars": {
+    "subject": {
+      "default": null
+    },
+    "competitors": {
+      "default": null
+    },
+    "focus": {
+      "default": "positioning, offer, pricing, audience"
+    }
+  },
+  "kind": "research",
+  "search": true,
+  "goal": "Write a competitor analysis for {subject} against: {competitors}. Focus: {focus}.",
+  "constraints": "Use live web search; prefer the competitors' own sites, pricing pages and reputable reviews, most recent first. Cite every factual claim inline as [n] with a numbered source list (title, URL, date accessed). Pricing only if publicly listed (quote it with currency and date seen), else 'not public'. Clearly separate facts (cited) from your assessment (labelled 'assessment'). Mark anything unverified as 'unknown'. No invented numbers, customers or reviews. Output analysis.md with: summary (3-5 sentences), comparison table (competitor, positioning, core offer, pricing, audience, source refs), strengths/weaknesses per competitor, gaps/opportunities for {subject}, sources.",
+  "done_when": "analysis.md covers every listed competitor with a row in the comparison table, strengths and weaknesses, public pricing or 'not public', a gaps/opportunities section, inline [n] citations and a numbered source list with URLs.",
+  "tools": []
+}

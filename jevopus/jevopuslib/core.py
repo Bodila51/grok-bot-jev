@@ -59,6 +59,10 @@ DEFAULT_CONFIG = {
     "cooldown_sec": 3600,
     "lease_sec": 7200,
     "run_timeout_sec": 1800,
+    "best_of_two": {"all_jobs": False, "recipes": [],
+                    "_note": "Run two models and keep the better verified result. Also: submit --best-of-two, or recipe \"best_of_two\": true."},
+    "limits": {"skip_above_percent": 90, "large_complexity_min": 3.0,
+               "_note": "Before leasing a large job (Jev complexity >= large_complexity_min on 0-4, or best-of-two), skip a seat whose provider-reported usage is above skip_above_percent."},
 }
 
 
@@ -72,18 +76,30 @@ def merge_models(user_models):
     return out
 
 
+def upgrade_user_config(user):
+    """-> (upgraded copy, changed). Adds new default models, top-level keys and missing sub-keys of dict settings;
+    never overwrites a value the user has set."""
+    out = json.loads(json.dumps(user))
+    if isinstance(out.get("models"), dict): out["models"] = merge_models(out["models"])
+    for k, dv in DEFAULT_CONFIG.items():
+        if k in ("models", "_note"): continue
+        if k not in out: out[k] = json.loads(json.dumps(dv))
+        elif isinstance(dv, dict) and isinstance(out[k], dict):
+            for f, fv in dv.items(): out[k].setdefault(f, fv)
+    return out, out != user
+
+
 def config():
     if not CONFIG.exists():
         CONFIG.write_text(json.dumps(DEFAULT_CONFIG, indent=2) + "\n")
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
     try:
         user = json.loads(CONFIG.read_text())
-        if isinstance(user.get("models"), dict):
-            merged = merge_models(user["models"])
-            if merged != user["models"]:  # upgrade: persist new default models/fields, keep user edits
-                user["models"] = merged
-                try: CONFIG.write_text(json.dumps(user, indent=2, ensure_ascii=False) + "\n")
-                except OSError: pass
+        up, changed = upgrade_user_config(user)
+        if changed:  # upgrade: persist new default models/fields/settings, keep user edits
+            user = up
+            try: CONFIG.write_text(json.dumps(user, indent=2, ensure_ascii=False) + "\n")
+            except OSError: pass
         for k, v in user.items():
             cfg[k] = {**cfg[k], **v} if isinstance(v, dict) and isinstance(cfg.get(k), dict) and k != "models" else v
     except Exception as e:
@@ -149,7 +165,10 @@ JOB_COLS = {  # added columns (idempotent ALTERs)
     "session_id": "TEXT", "verify_p": "REAL", "verify_status": "TEXT", "fix_rounds": "INTEGER DEFAULT 0",
     "goal_hash": "TEXT", "err_sig": "TEXT", "requires_confirm": "INTEGER DEFAULT 0", "confirmed": "INTEGER DEFAULT 0",
     "from_agent": "TEXT", "recipe": "TEXT", "recipe_vars": "TEXT", "cached_from": "TEXT", "forced": "INTEGER DEFAULT 0",
-    "cli_config": "TEXT", "attach": "TEXT", "feedback": "TEXT", "feedback_note": "TEXT", "model_evidence": "TEXT"}
+    "cli_config": "TEXT", "attach": "TEXT", "feedback": "TEXT", "feedback_note": "TEXT", "model_evidence": "TEXT",
+    # v5: best-of-two (parent + two child jobs), limits gating
+    "best_of_two": "INTEGER DEFAULT 0", "parent_id": "TEXT", "bo2_role": "TEXT", "job_dir": "TEXT", "winner": "TEXT",
+    "winner_reason": "TEXT", "complexity": "REAL", "search": "INTEGER DEFAULT 0"}
 SCHEMA = JOBS_DDL + """;
 CREATE TABLE IF NOT EXISTS seats(
   id TEXT PRIMARY KEY, cli TEXT, home_dir TEXT, model TEXT,
@@ -161,6 +180,9 @@ CREATE TABLE IF NOT EXISTS decisions(
   conf REAL, band TEXT, applied INTEGER, jev_used INTEGER, outcome TEXT);
 CREATE TABLE IF NOT EXISTS seat_events(ts TEXT, epoch REAL, seat_id TEXT, event TEXT, job_id TEXT, note TEXT);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS seat_limits(
+  seat_id TEXT, source TEXT, window TEXT, window_minutes INTEGER, used_percent REAL, resets_at REAL,
+  seen_at REAL, plan TEXT, note TEXT, PRIMARY KEY(seat_id, source, window));
 """
 CODEX_MODELS = "gpt-6-astra,gpt-6-sol,gpt-6-luna"
 CLAUDE_MODELS = "opus,sonnet,haiku"  # claude CLI aliases
@@ -207,6 +229,11 @@ def db():
     c.execute("INSERT OR REPLACE INTO meta VALUES('schema','2')")
     c.commit()
     return c
+
+
+def job_dir(job):
+    """Job directory: jobs/<id>/, or jobs/<parent>/<a|b>/ for best-of-two candidates."""
+    return Path(job["job_dir"]) if job["job_dir"] else JOBS / job["id"]
 
 
 def seat_event(c, seat_id, event, job_id="", note=""):

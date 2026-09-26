@@ -117,3 +117,35 @@ def ping(pb):
     with _client(pb) as c:
         r = c.system_one(state={"text": "2 + 2 = 4"}, questions={"ok": Noul(instructions="Is `text` arithmetically correct?")})
     return round(float(r.nouls["ok"].noul), 3)
+
+
+# ---------- best of two ----------
+def ask_second(pb, job, pool, first, evidence=None):
+    """Pick the second candidate model for best-of-two. pool: {model: fit} (first model excluded).
+    -> (model, confidence)."""
+    from typesafe_sdk import Choice
+    state = {"job": {"goal": job["goal"][:1500], "constraints": job["constraints"] or "", "done_when": job["done_when"] or ""},
+             "first_candidate": first, "models": pool,
+             "note": "The job runs twice: once on `first_candidate` and once on a second model; the better verified "
+                     "result is kept. Pick the second model most likely to also deliver a strong result."}
+    instr = "Which model in `models` is the best second candidate for `job`?"
+    if evidence:
+        state["model_history"] = {m: evidence.get(m, "no past jobs") for m in pool}
+        instr += (" `model_history` lists real outcomes of earlier jobs; weigh them over descriptions when a model "
+                  "has at least 3 outcomes. No history means unknown, not worse.")
+    with _client(pb) as c:
+        r = c.system_one(state=state, questions={"second": Choice(instructions=instr, criteria=dict(pool))})
+    return r.choices["second"].choice, round(float(r.choices["second"].confidence), 3)
+
+
+def ask_compare(pb, state):
+    """Blind comparison of two verified results. state: goal, done_when, candidates {a: {...}, b: {...}} (no model
+    names). -> (winner 'a'|'b', confidence)."""
+    from typesafe_sdk import Choice
+    q = {"better": Choice(instructions="Both `candidates` passed a check against `done_when`. Which one better "
+                                      "delivers `goal` (completeness, correctness, quality of the files shown, fewer "
+                                      "open issues)? Judge only the content shown.",
+                          criteria={"a": "Candidate a is the better deliverable", "b": "Candidate b is the better deliverable"})}
+    with _client(pb) as c:
+        r = c.system_one(state=state, questions=q)
+    return r.choices["better"].choice, round(float(r.choices["better"].confidence), 3)

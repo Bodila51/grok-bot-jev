@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Jevopus installer v2.0.20260926 (from a repo clone). Idempotent; safe to re-run. Never prints secrets.
+# Jevopus installer v2.5.20260926 (from a repo clone). Idempotent; safe to re-run. Never prints secrets.
 # usage: [JEVOPUS_HOME=/workspace/jevopus] [JEVOPUS_JEV_DIR=...] bash jevopus/install.sh [--no-render] [--skip-node] [--no-doctor]
 set -uo pipefail
 JEVOPUS_HOME="${JEVOPUS_HOME:-${FARM_HOME:-/workspace/jevopus}}"   # FARM_* = legacy names, still honored
@@ -94,10 +94,10 @@ echo "config: $JEVOPUS_JEV_DIR/config.yaml ($(grep -E '^mode:' "$JEVOPUS_JEV_DIR
 # ---------- 4. Jevopus files ----------
 say "4/7 Jevopus files -> $JEVOPUS_HOME"
 mkdir -p "$JEVOPUS_HOME"/{jobs,logs,seats,tools}
-[ "$(cd "$JEVOPUS_HOME" && pwd)" = "$SRC_DIR" ] || (cd "$SRC_DIR" && tar -cf - jevopus.py README.md tools/resume_fix.sh jevopuslib/__init__.py jevopuslib/core.py jevopuslib/evidence.py jevopuslib/jev.py jevopuslib/reports.py jevopuslib/runner.py jevopuslib/setup.py recipes/assets/motion_reference.py recipes/code-review.json recipes/data-cleanup.json recipes/landing-page.json recipes/motion-video.json recipes/research-brief.json recipes/x-post-drafts.json | tar -xf - -C "$JEVOPUS_HOME") || die "copy failed"
+[ "$(cd "$JEVOPUS_HOME" && pwd)" = "$SRC_DIR" ] || (cd "$SRC_DIR" && tar -cf - jevopus.py README.md tools/resume_fix.sh jevopuslib/__init__.py jevopuslib/bestof2.py jevopuslib/core.py jevopuslib/evidence.py jevopuslib/jev.py jevopuslib/limits.py jevopuslib/reports.py jevopuslib/runner.py jevopuslib/setup.py recipes/assets/motion_reference.py recipes/code-review.json recipes/competitor-analysis.json recipes/data-cleanup.json recipes/landing-page.json recipes/lead-finder.json recipes/media-kit.json recipes/motion-video.json recipes/presentation.json recipes/research-brief.json recipes/x-post-drafts.json | tar -xf - -C "$JEVOPUS_HOME") || die "copy failed"
 chmod +x "$JEVOPUS_HOME/jevopus.py" "$JEVOPUS_HOME/tools/resume_fix.sh"
 echo "$JEVOPUS_JEV_DIR" > "$JEVOPUS_HOME/.jev_dir"
-echo "installed Jevopus v2.0.20260926 ($(find "$JEVOPUS_HOME/jevopuslib" "$JEVOPUS_HOME/recipes" -type f | wc -l) lib/recipe files); config.json, jevopus.db, jobs/ and seats/ are kept"
+echo "installed Jevopus v2.5.20260926 ($(find "$JEVOPUS_HOME/jevopuslib" "$JEVOPUS_HOME/recipes" -type f | wc -l) lib/recipe files); config.json, jevopus.db, jobs/ and seats/ are kept"
 
 # ---------- 5. render venv (optional) ----------
 say "5/7 render venv (Pillow, numpy, pycairo)"

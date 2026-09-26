@@ -1,9 +1,9 @@
 """submit / route / tick / run (+ Jev verification and fix rounds) / confirm."""
 import json, os, re, shutil, subprocess, sys, time, uuid
 from pathlib import Path
-from . import evidence as ev_mod, jev
-from .core import (JOBS, RECIPES, HOME, LIMIT_RE, band, cli_model, config, db, enabled_models, env, err_sig, goal_hash, iso, log,
-                   now, playbook, record_decisions, refresh_seats, seat_event, worker_env)
+from . import evidence as ev_mod, jev, limits as lim
+from .core import (JOBS, RECIPES, HOME, LIMIT_RE, band, cli_model, config, db, enabled_models, env, err_sig, goal_hash, iso, job_dir,
+                   log, now, playbook, record_decisions, refresh_seats, seat_event, worker_env)
 
 PROMPT = """You are a worker in a job directory (your current working directory). Do this job:
 GOAL: {goal}
@@ -50,7 +50,8 @@ def check_tools(tools):
 
 def cmd_submit(a):
     c = db(); cfg = config()
-    recipe, vars_, cli_cfg, attach = None, None, [], []
+    recipe, vars_, cli_cfg, attach, search = None, None, [], [], int(bool(getattr(a, "search", False)))
+    bo2 = bool(getattr(a, "best_of_two", False)) or bool(cfg["best_of_two"].get("all_jobs"))
     goal, constraints, done_when, kind, model, effort = a.goal, a.constraints, a.done_when, a.kind, a.model, a.effort
     if a.recipe:
         r = load_recipe(a.recipe); recipe = r["name"]
@@ -60,37 +61,41 @@ def cmd_submit(a):
         kind = a.kind if a.kind != "coding" else r.get("kind", "coding")
         effort = effort or r.get("effort", "")
         cli_cfg, attach = r.get("codex_config", []), r.get("attach", [])
+        search = int(bool(r.get("search")) or search)
+        bo2 = bo2 or bool(r.get("best_of_two")) or recipe in (cfg["best_of_two"].get("recipes") or [])
         if r.get("model") and not model: print(f"note: recipe suggests model {r['model']} (Jev still picks unless you pin --model)", file=sys.stderr)
         miss = check_tools(r.get("tools"))
         if miss: print("warning: missing tools for this recipe: " + ", ".join(miss), file=sys.stderr)
     if not goal: sys.exit("--goal or --recipe required")
     jid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     c.execute("INSERT INTO jobs(id,goal,constraints,done_when,kind,status,created_at,model,effort,pin_seat,model_source,"
-              "goal_hash,confirmed,from_agent,recipe,recipe_vars,forced,cli_config,attach) "
-              "VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              "goal_hash,confirmed,from_agent,recipe,recipe_vars,forced,cli_config,attach,best_of_two,search) "
+              "VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
               (jid, goal, constraints, done_when, kind, iso(), model or None, effort or None, a.seat or None,
                "pinned" if model else None, goal_hash(goal), int(a.confirmed), a.from_agent or None, recipe,
-               json.dumps(vars_) if vars_ else None, int(a.force), json.dumps(cli_cfg), json.dumps(attach)))
+               json.dumps(vars_) if vars_ else None, int(a.force), json.dumps(cli_cfg), json.dumps(attach), int(bo2), search))
     c.commit(); (JOBS / jid).mkdir(parents=True, exist_ok=True); print(jid)
 
 
 def cmd_confirm(a):
-    c = db(); c.execute("UPDATE jobs SET confirmed=1 WHERE id=?", (a.job_id,)); c.commit()
+    c = db(); c.execute("UPDATE jobs SET confirmed=1 WHERE id=? OR parent_id=?", (a.job_id, a.job_id)); c.commit()
     log({"event": "confirm", "job_id": a.job_id}); print(f"{a.job_id}: confirmed by human")
 
 
 def cmd_cancel(a):
     c = db(); j = c.execute("SELECT * FROM jobs WHERE id=?", (a.job_id,)).fetchone()
     if not j or j["status"] not in ("queued", "leased"): sys.exit(f"only queued/leased jobs can be cancelled")
-    if j["status"] == "leased": c.execute("UPDATE seats SET status='idle' WHERE id=?", (j["seat_id"],))
-    c.execute("UPDATE jobs SET status='blocked', route_note=COALESCE(route_note,'')||'; cancelled by user', lease_until=NULL "
-              "WHERE id=?", (a.job_id,)); c.commit(); log({"event": "cancel", "job_id": a.job_id}); print(f"{a.job_id}: cancelled")
+    for k in [j, *c.execute("SELECT * FROM jobs WHERE parent_id=? AND status IN ('queued','leased')", (a.job_id,)).fetchall()]:
+        if k["status"] == "leased": c.execute("UPDATE seats SET status='idle' WHERE id=?", (k["seat_id"],))
+        c.execute("UPDATE jobs SET status='blocked', route_note=COALESCE(route_note,'')||'; cancelled by user', lease_until=NULL "
+                  "WHERE id=?", (k["id"],))
+    c.commit(); log({"event": "cancel", "job_id": a.job_id}); print(f"{a.job_id}: cancelled")
 
 
 # ---------- route ----------
 def _fail_info(c, job, pb):
     rows = c.execute("SELECT id, err_sig, result_path FROM jobs WHERE goal_hash=? AND id!=? AND status IN "
-                     "('failed','needs_review') AND err_sig IS NOT NULL ORDER BY created_at DESC",
+                     "('failed','needs_review') AND err_sig IS NOT NULL AND parent_id IS NULL ORDER BY created_at DESC",
                      (job["goal_hash"], job["id"])).fetchall()
     if not rows: return None
     n = 0
@@ -113,7 +118,7 @@ def cmd_route(a):
     if job["pin_seat"]:
         models = {m: f for m, f in models.items() if job["pin_seat"] in avail[m]}
     recent = [] if job["forced"] else [(r["id"], r["goal"]) for r in c.execute(
-        "SELECT id, goal FROM jobs WHERE status='done' AND id!=? AND result_path IS NOT NULL "
+        "SELECT id, goal FROM jobs WHERE status='done' AND id!=? AND result_path IS NOT NULL AND parent_id IS NULL "
         "AND (verify_status IS NULL OR verify_status='pass') ORDER BY created_at DESC LIMIT ?",
         (job["id"], int(cfg["reuse"]["candidates"])))]
     fail = _fail_info(c, job, pb)
@@ -144,7 +149,7 @@ def cmd_route(a):
         route, status = "stopped", "blocked"
         notes.append(f"STOP_RETRY: same error x{fail['same_error_count']} (p={j['stop_retry_p']}); not rerunning. "
                      "Change the approach/goal or ask the human.")
-    elif j["needs_farm_p"] < 0.5 and not job["pin_seat"]:
+    elif j["needs_farm_p"] < 0.5 and not job["pin_seat"] and not job["best_of_two"]:
         route = "inline"; notes.append(f"dispatcher should do it inline ({fb})")
     else:
         route, tier = "farm", j["tier"]
@@ -164,18 +169,31 @@ def cmd_route(a):
             dec.append(("model", j["model"], j["model_conf"], band(j["model_conf"] or 0, pol), msrc == "jev",
                         evid and evid["summary"]))
         if model and msrc != "pinned": notes.append(f"model {model} ({msrc})")
+        if job["best_of_two"] and model and (msrc != "pinned" or model in avail):
+            from . import bestof2
+            b2 = bestof2.pick_second(c, cfg, pb, job, model, models, avail)
+            if b2["model"]:
+                dec.append(("model_b", b2["model"], b2["conf"], band(b2["conf"] or 0, pol), True, b2["why"]))
+                route = "best_of_two"; notes.append(f"BEST OF TWO: {model} vs {b2['model']} ({b2['why']})")
+            else: notes.append(f"BEST OF TWO not possible ({b2['why']}); runs as a single job")
     if irr and route == "farm":
         notes.append("GUARD: irreversible/external action suspected (p=%.2f) -> " % j["irreversible_p"]
                      + ("confirmed by human" if job["confirmed"] else "REQUIRES --confirmed (jevopus.py confirm <id>)"))
     if not jev_used: notes.append(f"jev not used ({err or 'error'}) -> fallback rule")
     note = "; ".join(notes)
+    if irr and route == "best_of_two":
+        notes.append("GUARD: irreversible/external action suspected (p=%.2f) -> " % j["irreversible_p"]
+                     + ("confirmed by human" if job["confirmed"] else "REQUIRES --confirmed (jevopus.py confirm <id>)"))
+    note = "; ".join(notes)
     c.execute("UPDATE jobs SET route=?, tier=?, route_note=?, status=?, model=?, model_source=?, requires_confirm=?, "
-              "cached_from=?, result_path=COALESCE(?, result_path), model_evidence=? WHERE id=?",
+              "cached_from=?, result_path=COALESCE(?, result_path), model_evidence=?, complexity=? WHERE id=?",
               (route, tier, note, status, model, msrc, int(irr), cached_from, result_path,
-               json.dumps(evid, ensure_ascii=False) if evid else None, job["id"]))
+               json.dumps(evid, ensure_ascii=False) if evid else None, j.get("complexity"), job["id"]))
+    if route == "best_of_two":
+        bestof2.create_children(c, job["id"], model, msrc, b2)
     c.execute("DELETE FROM decisions WHERE job_id=? AND kind!='verify'", (job["id"],))
     record_decisions(c, job["id"], dec, jev_used); c.commit()
-    out = {"job_id": job["id"], "goal": job["goal"][:300], "kind": job["kind"], "jev_used": jev_used, "jev": j,
+    out = {"job_id": job["id"], "goal": job["goal"][:300], "kind": job["kind"], "jev_used": jev_used, "jev_mode": pb.get("mode"), "jev": j,
            "bands": {"farm": fb, "tier": tb}, "route": route, "tier": tier, "model": model, "model_source": msrc,
            "requires_confirm": irr, "status": status, "note": note,
            "model_evidence": evid and {"basis": evid["basis"], "lines": evid["lines"]}, "latency_ms": int((now() - t0) * 1000)}
@@ -186,34 +204,64 @@ def cmd_route(a):
 
 
 # ---------- tick ----------
+def _offers(s, model): return model in (s["models"] or s["model"] or "").split(",")
+
+
+def lease(c, job, cfg, quiet=False):
+    """Lease one queued worker job to a free seat (limits-gated for large jobs). -> seat id or None."""
+    say = (lambda m: None) if quiet else print
+    if job["requires_confirm"] and not job["confirmed"]:
+        say(f"{job['id']}: waiting for human confirmation (jevopus.py confirm {job['parent_id'] or job['id']})"); return None
+    q = "SELECT * FROM seats WHERE enabled=1 AND status='idle' AND (cooldown_until IS NULL OR cooldown_until<?)"
+    seats = c.execute(q, (now(),)).fetchall()
+    if job["pin_seat"]: seats = [s for s in seats if s["id"] == job["pin_seat"]]  # never another login
+    if job["model"]: seats = [s for s in seats if _offers(s, job["model"])]
+    else: seats = [s for s in seats if s["tier"] == job["tier"]]
+    if not seats: say(f"{job['id']}: waiting (no free enabled seat for {job['model'] or job['tier']})"); return None
+    seats, skipped = lim.gate(c, cfg, seats, job)
+    if not seats:
+        msg = "HELD (limits): large job not started; " + "; ".join(r for _, r in skipped) + \
+              ". Waits until usage drops/window resets, or raise limits.skip_above_percent in config.json."
+        if msg not in (job["route_note"] or ""):
+            c.execute("UPDATE jobs SET route_note=COALESCE(route_note,'')||'; '||? WHERE id=?", (msg, job["id"])); c.commit()
+        log({"event": "held", "job_id": job["id"], "reason": msg}); say(f"{job['id']}: {msg}"); return None
+    if job["parent_id"]:  # best-of-two: leave the sibling's only seat free if another seat can take this one
+        sib = c.execute("SELECT * FROM jobs WHERE parent_id=? AND id!=?", (job["parent_id"], job["id"])).fetchone()
+        if sib and sib["status"] == "queued" and sib["model"]:
+            seats = sorted(seats, key=lambda s: _offers(s, sib["model"]))
+    seat = seats[0]
+    c.execute("UPDATE seats SET status='busy' WHERE id=?", (seat["id"],))
+    c.execute("UPDATE jobs SET status='leased', seat_id=?, lease_until=? WHERE id=?",
+              (seat["id"], now() + cfg["lease_sec"], job["id"])); c.commit()
+    say(f"{job['id']}: leased to {seat['id']} ({job['model'] or seat['model']})")
+    return seat["id"]
+
+
 def cmd_tick(a):
-    c = db(); refresh_seats(c); n = 0
+    c = db(); cfg = config(); refresh_seats(c); lim.refresh(c); n = 0
     for job in c.execute("SELECT * FROM jobs WHERE status='queued' AND route='farm' ORDER BY created_at").fetchall():
-        if job["requires_confirm"] and not job["confirmed"]:
-            print(f"{job['id']}: waiting for human confirmation (jevopus.py confirm {job['id']})"); continue
-        q = "SELECT * FROM seats WHERE enabled=1 AND status='idle' AND (cooldown_until IS NULL OR cooldown_until<?)"
-        seats = c.execute(q, (now(),)).fetchall()
-        if job["pin_seat"]: seats = [s for s in seats if s["id"] == job["pin_seat"]]  # never another login
-        if job["model"]: seats = [s for s in seats if job["model"] in (s["models"] or s["model"]).split(",")]
-        else: seats = [s for s in seats if s["tier"] == job["tier"]]
-        if not seats: print(f"{job['id']}: waiting (no free enabled seat for {job['model'] or job['tier']})"); continue
-        seat = seats[0]
-        c.execute("UPDATE seats SET status='busy' WHERE id=?", (seat["id"],))
-        c.execute("UPDATE jobs SET status='leased', seat_id=?, lease_until=? WHERE id=?",
-                  (seat["id"], now() + config()["lease_sec"], job["id"])); c.commit(); n += 1
-        print(f"{job['id']}: leased to {seat['id']} ({job['model'] or seat['model']})")
+        n += bool(lease(c, c.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone(), cfg))
+    for p in c.execute("SELECT id FROM jobs WHERE status='queued' AND route='best_of_two'").fetchall():
+        print(f"{p['id']}: best-of-two parent (candidates {p['id']}-a / {p['id']}-b); run it with: jevopus.py run {p['id']}")
     print(f"tick: {n} lease(s)")
 
 
 # ---------- run ----------
-def _argv(seat, model, effort, prompt, cli_cfg, session=None):
+SEARCH_CFG = 'web_search="live"'  # codex 0.157: same as `codex exec --search`, and also valid for `exec resume`
+
+
+def _argv(seat, model, effort, prompt, cli_cfg, session=None, search=False):
     if seat["cli"] == "codex":
+        cli_cfg = list(cli_cfg) + ([SEARCH_CFG] if search and not any(k.startswith("web_search") for k in cli_cfg) else [])
         extra = [x for kv in cli_cfg for x in ("-c", kv)] + (["-c", f"model_reasoning_effort={effort}"] if effort else [])
         if session:
             return ["codex", "exec", "resume", session, "--skip-git-repo-check", "-m", model,
                     "-c", "sandbox_mode=workspace-write", *extra, prompt]
         return ["codex", "exec", "--skip-git-repo-check", "-s", "workspace-write", "-m", model, *extra, prompt]
-    return ["claude", "-p", prompt, "--model", model, "--output-format", "json", *(["--resume", session] if session else [])]
+    # stream-json (+ --verbose, required) carries usage, session_id and rate_limit_event lines (limits command)
+    return ["claude", "-p", prompt, "--model", model, "--output-format", "stream-json", "--verbose",
+            "--permission-mode", "acceptEdits", *(["--allowedTools", "WebSearch", "WebFetch"] if search else []),
+            *(["--resume", session] if session else [])]
 
 
 def _exec(argv, jdir, env, timeout):
@@ -230,11 +278,14 @@ def parse_usage(out):
     sid = re.search(r"session id:\s*([0-9a-f-]{16,})", out)
     sid = sid.group(1) if sid else None
     if not toks:
-        try:
-            d = json.loads(out.split("\n--- stderr ---")[0]); u = d.get("usage") or {}
-            toks = sum(int(u.get(k) or 0) for k in ("input_tokens", "output_tokens"))
-            sid = sid or d.get("session_id")
-        except Exception: pass
+        body = out.split("\n--- stderr ---")[0].strip()
+        cands = [body] + [ln for ln in reversed(body.splitlines()) if ln.startswith("{") and '"result"' in ln]
+        for txt in cands:  # claude --output-format json (one object) or stream-json (final type=result line)
+            try:
+                d = json.loads(txt); u = d.get("usage") or {}
+                toks = sum(int(u.get(k) or 0) for k in ("input_tokens", "output_tokens"))
+                sid = sid or d.get("session_id"); break
+            except Exception: continue
     return toks, sid
 
 
@@ -258,19 +309,22 @@ def verify(pb, job, jdir, log_text):
 def cmd_run(a):
     c = db(); cfg, pb = config(), playbook()
     job = c.execute("SELECT * FROM jobs WHERE id=?", (a.job_id,)).fetchone()
+    if job and job["route"] == "best_of_two":
+        from . import bestof2
+        return bestof2.run_parent(c, job)
     if not job or job["status"] != "leased": sys.exit(f"job {a.job_id} is not leased (status={job and job['status']})")
     if job["requires_confirm"] and not job["confirmed"]: sys.exit("job requires human confirmation first")
     seat = c.execute("SELECT * FROM seats WHERE id=?", (job["seat_id"],)).fetchone()
-    jdir = JOBS / job["id"]; jdir.mkdir(parents=True, exist_ok=True)
+    jdir = job_dir(job); jdir.mkdir(parents=True, exist_ok=True)
     for f in json.loads(job["attach"] or "[]"):
         src = RECIPES / f
         if src.exists(): shutil.copy(src, jdir / src.name)
     prompt = PROMPT.format(goal=job["goal"], constraints=job["constraints"] or "none", done_when=job["done_when"] or "goal met")
-    model, env, cli_cfg = job["model"] or seat["model"], worker_env(seat), json.loads(job["cli_config"] or "[]")
-    timeout = int(env("RUN_TIMEOUT", cfg["run_timeout_sec"]))
+    model, wenv, cli_cfg = job["model"] or seat["model"], worker_env(seat), json.loads(job["cli_config"] or "[]")
+    timeout, search = int(env("RUN_TIMEOUT", cfg["run_timeout_sec"])), bool(job["search"])
     c.execute("UPDATE jobs SET status='running', prompt=?, model=?, started_at=? WHERE id=?", (prompt, model, iso(), job["id"])); c.commit()
     t0 = now(); print(f"running {job['id']} on {seat['id']} ({seat['cli']} {model})...", flush=True)
-    out, rc = _exec(_argv(seat, cli_model(cfg, model), job["effort"], prompt, cli_cfg), jdir, env, timeout)
+    out, rc = _exec(_argv(seat, cli_model(cfg, model), job["effort"], prompt, cli_cfg, search=search), jdir, wenv, timeout)
     (jdir / "worker.log").write_text(out)
     tokens, sid = parse_usage(out)
     res = _read_result(jdir)
@@ -292,7 +346,7 @@ def cmd_run(a):
             rounds += 1
             fix = FIX_PROMPT.format(p=vp, done_when=job["done_when"] or "goal met",
                                     issues="; ".join(res.get("open_issues") or []) or "none listed")
-            out2, rc = _exec(_argv(seat, cli_model(cfg, model), job["effort"], fix, cli_cfg, session=sid), jdir, env, timeout)
+            out2, rc = _exec(_argv(seat, cli_model(cfg, model), job["effort"], fix, cli_cfg, session=sid, search=search), jdir, wenv, timeout)
             (jdir / f"worker_fix{rounds}.log").write_text(out2); t2, _ = parse_usage(out2); tokens += t2
             log({"event": "run_fix", "job_id": job["id"], "seat": seat["id"], "model": model, "session": sid, "rc": rc, "round": rounds})
             if rc != 0 and LIMIT_RE.search(out2):
@@ -313,6 +367,10 @@ def cmd_run(a):
               "verify_p=?, verify_status=?, fix_rounds=?, err_sig=? WHERE id=?",
               (status, str(rp), tokens, secs, iso(), sid, vp, vstatus, rounds, esig, job["id"]))
     seat_event(c, seat["id"], "job_" + status, job["id"]); c.commit()
+    lim.after_run(c, seat, out)
     log({"event": "run", "job_id": job["id"], "seat": seat["id"], "model": model, "rc": rc, "status": status,
          "limited": limited, "tokens": tokens, "verify_p": vp, "fix_rounds": rounds, "secs": secs})
     print(rp.read_text())
+    if job["parent_id"]:
+        from . import bestof2
+        bestof2.maybe_finish(c, job["parent_id"])

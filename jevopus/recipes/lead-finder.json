@@ -1,0 +1,27 @@
+{
+  "name": "lead-finder",
+  "description": "Find companies/agencies matching criteria from public sources: lead table + personalized pitch drafts (drafts only, never sent)",
+  "vars": {
+    "criteria": {
+      "default": null
+    },
+    "offer": {
+      "default": null
+    },
+    "n": {
+      "default": "10"
+    },
+    "region": {
+      "default": "any"
+    },
+    "sender": {
+      "default": "me"
+    }
+  },
+  "kind": "research",
+  "search": true,
+  "goal": "Find {n} companies or agencies that match: {criteria} (region: {region}) and would plausibly buy: {offer}. For each, write a short personalized pitch draft from {sender}.",
+  "constraints": "Use live web search and only public sources (company sites, public directories, press). Drafts only: do NOT email, message, post, submit forms, sign up or contact anyone; no credentials are available. Only list a contact channel if it is publicly published for business contact (contact page, generic info@ address, public booking form); never guess personal emails or scrape private data; write 'not public' otherwise. Every lead needs a source URL; do not invent companies, people, clients or numbers; mark unverified facts as 'unverified'. Each pitch <= 120 words, references one specific, sourced detail about the lead, no false claims about {offer}. Output leads.md (table: #, name, website, contact channel (public), why fit, source URL) and pitches.md (one numbered draft per lead, same numbering) and leads.csv with the same table columns.",
+  "done_when": "leads.md and leads.csv list {n} distinct real leads with website, public contact channel or 'not public', a one-line why-fit and a source URL each; pitches.md has one numbered <=120-word draft per lead that cites a specific sourced detail; nothing was sent.",
+  "tools": []
+}

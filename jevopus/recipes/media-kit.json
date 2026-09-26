@@ -1,0 +1,23 @@
+{
+  "name": "media-kit",
+  "description": "One-page media kit for a creator/influencer from provided facts (HTML + markdown); no invented metrics",
+  "vars": {
+    "creator": {
+      "default": null
+    },
+    "facts": {
+      "default": null
+    },
+    "style": {
+      "default": "clean, modern, light, brand-friendly"
+    },
+    "contact": {
+      "default": "[CONTACT - fill in]"
+    }
+  },
+  "kind": "write",
+  "goal": "Create a one-page media kit for {creator} using only these facts: {facts}. Style: {style}. Contact line: {contact}.",
+  "constraints": "Use ONLY the facts given (audience size/demographics, platforms, niches, content formats, past collaborations, rates if given). Never invent follower counts, engagement rates, demographics, brand names, testimonials or prices: where data is missing, show a clearly marked placeholder like [ADD: engagement rate] (styled visibly, e.g. highlighted). Rates section only if prices were provided, else a placeholder. Sections: header (name, tagline, platforms), about, audience, niches, formats/services, past collaborations, rates, contact. Output media_kit.html (single self-contained file: inline CSS, no external requests, printable to one A4/Letter page) and media_kit.md with the same content, plus missing_data.md listing every placeholder.",
+  "done_when": "media_kit.html (self-contained, one printable page) and media_kit.md exist with all listed sections, every number/brand in them appears in the provided facts, and missing_data.md lists each [ADD: ...] placeholder used.",
+  "tools": []
+}

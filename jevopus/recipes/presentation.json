@@ -1,0 +1,26 @@
+{
+  "name": "presentation",
+  "description": "Slide deck from a topic/outline: self-contained HTML slides (keyboard/print) + slide outline markdown",
+  "vars": {
+    "topic": {
+      "default": null
+    },
+    "outline": {
+      "default": "(none: propose a logical outline)"
+    },
+    "slides": {
+      "default": "8"
+    },
+    "audience": {
+      "default": "general"
+    },
+    "style": {
+      "default": "clean, modern, high contrast"
+    }
+  },
+  "kind": "write",
+  "goal": "Build a {slides}-slide presentation on: {topic} for a {audience} audience. Outline: {outline}. Style: {style}.",
+  "constraints": "Output slides.html: ONE self-contained file (inline CSS/JS, no external requests, fonts, CDNs or frameworks), one <section> per slide, arrow keys/space to navigate, slide counter, and a print stylesheet that puts one slide per page (so the owner can Save as PDF). Also write slides.md (per slide: title, bullets, speaker notes). Max ~6 bullets per slide, readable at 16:9. Do not invent statistics, quotes or data; if the topic needs facts that were not provided, put a visible [SOURCE NEEDED] marker instead. Visuals via inline SVG/CSS only.",
+  "done_when": "slides.html exists, is standalone (no http/https resource URLs), has exactly {slides} slide sections with keyboard navigation and a print stylesheet; slides.md has the same {slides} slides with speaker notes; no unsourced statistics.",
+  "tools": []
+}

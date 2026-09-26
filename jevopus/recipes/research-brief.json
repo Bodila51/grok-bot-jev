@@ -12,10 +12,8 @@
   "kind": "research",
   "model": "gpt-6-luna",
   "goal": "Write a research brief on: {topic}. Use exactly {n} distinct, reputable sources.",
-  "constraints": "Use web search. Cite every factual claim inline as [n] with a numbered source list (title, URL, date accessed). No paywalled or invented sources. Output brief.md only.",
+  "constraints": "Use live web search (enabled for this job) and prefer primary/official sources, most recent first. Cite every factual claim inline as [n] with a numbered source list (title, URL, publication date if shown, date accessed). No paywalled or invented sources; write 'unknown' where a fact could not be verified. Output brief.md only.",
   "done_when": "brief.md exists with a 3-5 sentence summary, a markdown comparison table, {n} numbered sources with URLs, and inline [n] citations.",
   "tools": [],
-  "codex_config": [
-    "web_search=\"live\""
-  ]
+  "search": true
 }

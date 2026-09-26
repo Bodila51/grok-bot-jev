@@ -71,9 +71,18 @@ def cmd_doctor(a):
                 f"python3 {HOME}/jevopus.py setup-seat {name}", optional=opt)
         n_en = c.execute("SELECT COUNT(*) FROM seats WHERE enabled=1").fetchone()[0]
         chk(n_en > 0, "at least one enabled seat", f"{n_en} enabled", f"python3 {HOME}/jevopus.py setup-seat codex-sub  (or claude-strong)")
+        try:
+            from . import limits
+            limits.refresh(c); print(f"[info] limits - {limits.short_line(c, config())}  (details: jevopus.py limits)")
+        except Exception as e: print(f"[info] limits - unavailable ({type(e).__name__})")
     jd = jev_dir()
     chk(jd is not None, "Jev router repo + venv", str(jd), "rerun jevopus_install.sh (clones grok-bot-jev and creates .venv)")
     if jd: chk((jd / "config.yaml").exists(), "Jev config.yaml", f"mode={playbook().get('mode')}", f"cp {jd}/config.example.yaml {jd}/config.yaml")
+    if c:
+        try:
+            from .reports import mode_progress_line
+            print(f"[info] {mode_progress_line(c)}")
+        except Exception as e: print(f"[info] Jev mode progress unavailable ({type(e).__name__})")
     has_ts = bool(os.environ.get("TYPESAFE_API_KEY"))
     chk(has_ts, "TYPESAFE_API_KEY present", "set" if has_ts else "missing", f"add the TypeSafe key as a secret; {KEY_HINT}")
     if has_ts:
