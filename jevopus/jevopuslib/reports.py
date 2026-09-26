@@ -16,6 +16,13 @@ def cmd_status(a):
     for j in c.execute("SELECT * FROM jobs ORDER BY created_at"):
         print(f"  {j['id']} {j['status']:12} {j['route'] or '-'}/{j['model'] or j['tier'] or '-'} seat={j['seat_id'] or '-'} "
               f":: {j['goal'][:60]!r}")
+        if j["status"] == "needs_model" and j["model_issue"]:
+            try: d = json.loads(j["model_issue"])
+            except Exception: d = {}
+            alt = (d.get("alternatives") or [{}])[0].get("model")
+            print(f"      NEEDS MODEL: '{d.get('requested')}' {d.get('case')} - {d.get('reason', '')[:110]}"
+                  f"\n      -> connect: {d.get('connect', '')[:110]} | " + (f"jevopus.py repin {j['id']} {alt} | " if alt else "")
+                  + f"jevopus.py cancel {j['id']}")
     from . import limits
     print("LIMITS  " + limits.short_line(c, config()) + "   (details: jevopus.py limits)")
 
@@ -57,6 +64,10 @@ def cmd_report(a):
         print(f"  {d['kind']:11} {d['answer']:<22} conf={d['conf'] if d['conf'] is not None else '-':<6} {d['band'] or '':9} "
               f"{'applied' if d['applied'] else 'advice'}{'' if d['jev_used'] else ' (fallback)'}")
     print(f"note: {j['route_note'] or '-'}")
+    if j["model_issue"]:
+        from .models import human
+        try: print(human(json.loads(j["model_issue"]), j["id"]))
+        except Exception: pass
     try: ev = json.loads(j["model_evidence"]) if j["model_evidence"] else None
     except Exception: ev = None
     if ev:

@@ -1,4 +1,4 @@
-# Jevopus v2.5 — worker seats with a Jev decision layer
+# Jevopus v2.6 — worker seats with a Jev decision layer
 
 Jevopus (formerly "Farm") runs headless coding agents ("seats") on this computer, one job per seat, and brings
 back compact results. Two first-class worker options: **Codex** (ChatGPT subscription login, or an OpenAI API key)
@@ -38,9 +38,30 @@ jevopus.py recipes | doctor | setup-seat codex-sub|codex-api|claude-strong [--di
 jevopus.py limits         # per seat: provider-reported usage % + reset time (real CLI data), Jevopus-counted jobs/tokens
                           #   in 5h / 7d, cooldown state
 jevopus.py jev-mode [shadow|active] [--by NAME] [--note T] [--force]   # show / change the Jev mode (owner decision)
+jevopus.py models         # every model: available yes/no, seat, why not + how to connect, fit line, accepted names
+jevopus.py repin <id> <model|auto> | repin <id> --alternative [N]   # proceed with a needs_model job
+jevopus.py guide          # short owner guide (plain English, reflects what is connected now) for the bot to relay
 ```
 Typical flow: `id=$(jevopus.py submit ...) && jevopus.py route $id && jevopus.py tick && jevopus.py run $id && jevopus.py report $id`
 (the same flow works for best-of-two: `run <id>` on the parent runs both candidates and picks the winner).
+
+## Requested model not available (`needs_model`)
+A model you name (`--model`, `model:` in a JEVOPUS JOB, or a recipe with `"pin_model": true`; a plain recipe `model`
+is only a hint) is never silently replaced. Names are resolved first: exact ids, common names (`Sonnet`,
+`Claude Sonnet`, `claude-sonnet-5`, `Opus`, `Haiku`, `Astra`, `Sol`, `Luna`, `GPT-6 Sol`) and unambiguous typos
+(`sonet`, `gpt6 sol`) map to the real id (noted); ambiguous names (`claude`, `gpt6`) are not guessed. If the model
+cannot run now, `route` sets status **`needs_model`** and stores a JSON note (`jobs.model_issue`: requested, case,
+reason, seats, connect, resets_at, suggestions, alternatives, proceed) plus a readable message:
+- `unknown` — not a model Jevopus knows (with "did you mean" suggestions);
+- `not_connected` — known, but its seat is disabled / not logged in / CLI missing: names the seat and the exact
+  setup step (e.g. `setup-seat claude-strong`); `seat_mismatch` — the pinned `--seat` does not offer it;
+- `cooldown` / `over_limit` — the seat is cooling down after a usage limit, or (large jobs) is above the limits
+  threshold: says when it resets; `tick` re-checks such jobs and re-queues them automatically once available.
+Each note lists 1-2 available alternatives picked by the normal model choice (Jev's pick if confident, else the
+default model, then the model with most verified passes) with their fit line. Proceed with
+`jevopus.py repin <id> <model>`, `repin <id> --alternative [N]`, `repin <id> auto` (let Jev choose) or
+`jevopus.py cancel <id>`. `status` and `report` show the note. Best of two: if the pinned candidate is unavailable,
+the parent gets `needs_model` and no candidates are created until you repin.
 
 ## Best of two
 Ask for it with `submit --best-of-two` (or `best-of-two: yes` in a JEVOPUS JOB), opt a recipe in with `"best_of_two": true`,
@@ -173,7 +194,7 @@ renamed to `jevopus.db` on first use. On upgrade, new `config.json` settings (e.
 added automatically; values you edited are never overwritten.
 
 ## Files
-`jevopus.py` (CLI) · `jevopuslib/core.py` (paths, config, db + idempotent migrations) · `jevopuslib/jev.py` (all
+`jevopuslib/models.py` (model names, availability, needs_model) · `jevopuslib/guide.py` (guide) · `jevopus.py` (CLI) · `jevopuslib/core.py` (paths, config, db + idempotent migrations) · `jevopuslib/jev.py` (all
 Jev calls + fallbacks) · `jevopuslib/runner.py` (submit/route/tick/run/verify) · `jevopuslib/bestof2.py` (best of two)
 · `jevopuslib/limits.py` (limits) · `jevopuslib/reports.py` (+ jev-mode) ·
 `jevopuslib/evidence.py` (model history for Jev) · `jevopuslib/setup.py` (doctor, setup-seat) · `config.json` (created on first run; models table etc.) · `recipes/` ·

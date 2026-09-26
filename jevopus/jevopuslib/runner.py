@@ -1,7 +1,7 @@
 """submit / route / tick / run (+ Jev verification and fix rounds) / confirm."""
 import json, os, re, shutil, subprocess, sys, time, uuid
 from pathlib import Path
-from . import evidence as ev_mod, jev, limits as lim
+from . import evidence as ev_mod, jev, limits as lim, models as mdl
 from .core import (JOBS, RECIPES, HOME, LIMIT_RE, band, cli_model, config, db, enabled_models, env, err_sig, goal_hash, iso, job_dir,
                    log, now, playbook, record_decisions, refresh_seats, seat_event, worker_env)
 
@@ -63,18 +63,57 @@ def cmd_submit(a):
         cli_cfg, attach = r.get("codex_config", []), r.get("attach", [])
         search = int(bool(r.get("search")) or search)
         bo2 = bo2 or bool(r.get("best_of_two")) or recipe in (cfg["best_of_two"].get("recipes") or [])
-        if r.get("model") and not model: print(f"note: recipe suggests model {r['model']} (Jev still picks unless you pin --model)", file=sys.stderr)
+        if r.get("model") and not model:
+            if r.get("pin_model"): model = r["model"]  # recipe pins its model: same needs_model handling as --model
+            else: print(f"note: recipe suggests model {r['model']} (Jev still picks unless you pin --model)", file=sys.stderr)
         miss = check_tools(r.get("tools"))
         if miss: print("warning: missing tools for this recipe: " + ", ".join(miss), file=sys.stderr)
     if not goal: sys.exit("--goal or --recipe required")
+    requested = model or None
+    if model:
+        rs = mdl.resolve(cfg, model)
+        if rs["model"] and rs["model"] != model:
+            print(f"note: model '{model}' understood as {rs['model']} ({rs['how']} match)", file=sys.stderr); model = rs["model"]
+        elif not rs["model"]:
+            print(f"note: model '{model}' is not a known model; route will mark the job needs_model"
+                  + (f" (did you mean: {', '.join(rs['suggestions'])})" if rs["suggestions"] else ""), file=sys.stderr)
     jid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     c.execute("INSERT INTO jobs(id,goal,constraints,done_when,kind,status,created_at,model,effort,pin_seat,model_source,"
-              "goal_hash,confirmed,from_agent,recipe,recipe_vars,forced,cli_config,attach,best_of_two,search) "
-              "VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              "goal_hash,confirmed,from_agent,recipe,recipe_vars,forced,cli_config,attach,best_of_two,search,requested_model) "
+              "VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
               (jid, goal, constraints, done_when, kind, iso(), model or None, effort or None, a.seat or None,
                "pinned" if model else None, goal_hash(goal), int(a.confirmed), a.from_agent or None, recipe,
-               json.dumps(vars_) if vars_ else None, int(a.force), json.dumps(cli_cfg), json.dumps(attach), int(bo2), search))
+               json.dumps(vars_) if vars_ else None, int(a.force), json.dumps(cli_cfg), json.dumps(attach), int(bo2), search, requested))
     c.commit(); (JOBS / jid).mkdir(parents=True, exist_ok=True); print(jid)
+
+
+def cmd_repin(a):
+    """Proceed with a needs_model (or not yet started) job: pin another model, an offered alternative, or 'auto'."""
+    c = db(); cfg = config(); j = c.execute("SELECT * FROM jobs WHERE id=?", (a.job_id,)).fetchone()
+    if not j: sys.exit(f"no job {a.job_id}")
+    if j["status"] not in ("needs_model", "queued") or j["parent_id"]:
+        sys.exit(f"{a.job_id}: only needs_model/queued jobs can be repinned (status={j['status']})")
+    if c.execute("SELECT 1 FROM jobs WHERE parent_id=? AND status NOT IN ('queued','blocked')", (j["id"],)).fetchone():
+        sys.exit(f"{a.job_id}: best-of-two candidates already started")
+    want = a.model
+    if a.alternative:
+        alts = (json.loads(j["model_issue"]) if j["model_issue"] else {}).get("alternatives") or []
+        if len(alts) < a.alternative: sys.exit(f"{a.job_id}: no alternative #{a.alternative} (see jevopus.py report {a.job_id})")
+        want = alts[a.alternative - 1]["model"]
+    if not want: sys.exit("give a model, 'auto' (let Jev choose), or --alternative [N]")
+    if want == "auto": model, src = None, None
+    else:
+        rs = mdl.resolve(cfg, want)
+        if not rs["model"]:
+            sys.exit(f"'{want}' is not a known model" + (f"; did you mean: {', '.join(rs['suggestions'])}" if rs["suggestions"] else "")
+                     + " (see jevopus.py models)")
+        model, src = rs["model"], "pinned"
+    c.execute("DELETE FROM jobs WHERE parent_id=? AND status IN ('queued','blocked')", (j["id"],))
+    c.execute("UPDATE jobs SET model=?, model_source=?, requested_model=?, model_issue=NULL, status='queued', route=NULL "
+              "WHERE id=?", (model, src, want if model else None, j["id"])); c.commit()
+    log({"event": "repin", "job_id": j["id"], "model": model or "auto"})
+    print(f"{j['id']}: model -> {model or 'auto (Jev chooses)'}; re-routing", flush=True)
+    cmd_route(type("A", (), {"job_id": j["id"]})())
 
 
 def cmd_confirm(a):
@@ -84,8 +123,8 @@ def cmd_confirm(a):
 
 def cmd_cancel(a):
     c = db(); j = c.execute("SELECT * FROM jobs WHERE id=?", (a.job_id,)).fetchone()
-    if not j or j["status"] not in ("queued", "leased"): sys.exit(f"only queued/leased jobs can be cancelled")
-    for k in [j, *c.execute("SELECT * FROM jobs WHERE parent_id=? AND status IN ('queued','leased')", (a.job_id,)).fetchall()]:
+    if not j or j["status"] not in ("queued", "leased", "needs_model"): sys.exit(f"only queued/leased/needs_model jobs can be cancelled")
+    for k in [j, *c.execute("SELECT * FROM jobs WHERE parent_id=? AND status IN ('queued','leased','needs_model')", (a.job_id,)).fetchall()]:
         if k["status"] == "leased": c.execute("UPDATE seats SET status='idle' WHERE id=?", (k["seat_id"],))
         c.execute("UPDATE jobs SET status='blocked', route_note=COALESCE(route_note,'')||'; cancelled by user', lease_until=NULL "
                   "WHERE id=?", (k["id"],))
@@ -134,6 +173,7 @@ def cmd_route(a):
     fb, tb = band(farm_conf, pol), band(j["tier_conf"], pol)
     dec = [("needs_farm", round(j["needs_farm_p"], 3), farm_conf, fb, True), ("tier", j["tier"], j["tier_conf"], tb, True)]
     route, tier, status, model, msrc, notes, cached_from, result_path = None, None, "queued", job["model"], job["model_source"], [], None, None
+    issue = None
     irr = j["irreversible_p"] >= float(cfg["guard"]["confirm_min"])
     dec.append(("guard", j["irreversible_p"], max(j["irreversible_p"], 1 - j["irreversible_p"]),
                 band(max(j["irreversible_p"], 1 - j["irreversible_p"]), pol), irr))
@@ -156,7 +196,15 @@ def cmd_route(a):
         notes.append(f"farm/{tier} (farm:{fb}, tier:{tb})")
         if fb == "escalate" or tb == "escalate": notes.append("low confidence - ask the human before spending a seat")
         if job["model_source"] == "pinned":
-            if job["model"] not in avail: notes.append(f"UNAVAILABLE: pinned model {job['model']} not on an enabled seat")
+            large = bool(job["best_of_two"]) or float(j.get("complexity") or 0) >= float(cfg["limits"]["large_complexity_min"])
+            av = mdl.availability(c, cfg, job["model"], job["pin_seat"], large=large)
+            if not av["available"]:
+                pick = j.get("model") if j.get("model") and (j.get("model_conf") or 0) >= float(th.get("min_choice_confidence", 0.55)) else None
+                sugg = mdl.resolve(cfg, job["requested_model"] or job["model"])["suggestions"] if av["case"] == "unknown" else []
+                issue = mdl.issue(c, cfg, job, job["requested_model"] or job["model"], av, sugg, pick, large)
+                status = "needs_model"
+                notes.append(f"NEEDS_MODEL ({av['case']}): {av['reason']}; connect: {av['connect']}; alternatives: "
+                             + (", ".join(x["model"] for x in issue["alternatives"]) or "none") + f"; repin or cancel")
         elif not models:
             notes.append("UNAVAILABLE: no enabled seat/model (run jevopus.py doctor / setup-seat); job stays queued")
         elif len(models) == 1:
@@ -169,7 +217,7 @@ def cmd_route(a):
             dec.append(("model", j["model"], j["model_conf"], band(j["model_conf"] or 0, pol), msrc == "jev",
                         evid and evid["summary"]))
         if model and msrc != "pinned": notes.append(f"model {model} ({msrc})")
-        if job["best_of_two"] and model and (msrc != "pinned" or model in avail):
+        if job["best_of_two"] and model and status != "needs_model" and (msrc != "pinned" or model in avail):
             from . import bestof2
             b2 = bestof2.pick_second(c, cfg, pb, job, model, models, avail)
             if b2["model"]:
@@ -186,9 +234,10 @@ def cmd_route(a):
                      + ("confirmed by human" if job["confirmed"] else "REQUIRES --confirmed (jevopus.py confirm <id>)"))
     note = "; ".join(notes)
     c.execute("UPDATE jobs SET route=?, tier=?, route_note=?, status=?, model=?, model_source=?, requires_confirm=?, "
-              "cached_from=?, result_path=COALESCE(?, result_path), model_evidence=?, complexity=? WHERE id=?",
+              "cached_from=?, result_path=COALESCE(?, result_path), model_evidence=?, complexity=?, model_issue=? WHERE id=?",
               (route, tier, note, status, model, msrc, int(irr), cached_from, result_path,
-               json.dumps(evid, ensure_ascii=False) if evid else None, j.get("complexity"), job["id"]))
+               json.dumps(evid, ensure_ascii=False) if evid else None, j.get("complexity"),
+               json.dumps(issue, ensure_ascii=False) if issue else None, job["id"]))
     if route == "best_of_two":
         bestof2.create_children(c, job["id"], model, msrc, b2)
     c.execute("DELETE FROM decisions WHERE job_id=? AND kind!='verify'", (job["id"],))
@@ -197,8 +246,10 @@ def cmd_route(a):
            "bands": {"farm": fb, "tier": tb}, "route": route, "tier": tier, "model": model, "model_source": msrc,
            "requires_confirm": irr, "status": status, "note": note,
            "model_evidence": evid and {"basis": evid["basis"], "lines": evid["lines"]}, "latency_ms": int((now() - t0) * 1000)}
+    if issue: out["model_issue"] = issue
     if err: out["error"] = err
     log({"event": "route", **out}); print(json.dumps(out, indent=2))
+    if issue: print("\n" + mdl.human(issue, job["id"]))
     if reuse_hit and result_path and Path(result_path).exists():
         print(f"\nexisting result ({cached_from}):\n{Path(result_path).read_text()[:1500]}")
 
@@ -239,6 +290,12 @@ def lease(c, job, cfg, quiet=False):
 
 def cmd_tick(a):
     c = db(); cfg = config(); refresh_seats(c); lim.refresh(c); n = 0
+    for job in c.execute("SELECT * FROM jobs WHERE status='needs_model' AND model_issue IS NOT NULL").fetchall():
+        try: iss = json.loads(job["model_issue"])
+        except Exception: continue
+        if iss.get("case") in ("cooldown", "over_limit") and mdl.availability(c, cfg, job["model"], job["pin_seat"], lim.is_large(job, cfg))["available"]:
+            c.execute("UPDATE jobs SET status='queued', model_issue=NULL, route_note=COALESCE(route_note,'')||'; model available again' "
+                      "WHERE id=?", (job["id"],)); c.commit(); print(f"{job['id']}: {job['model']} is available again -> queued")
     for job in c.execute("SELECT * FROM jobs WHERE status='queued' AND route='farm' ORDER BY created_at").fetchall():
         n += bool(lease(c, c.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone(), cfg))
     for p in c.execute("SELECT id FROM jobs WHERE status='queued' AND route='best_of_two'").fetchall():

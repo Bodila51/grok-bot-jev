@@ -154,7 +154,7 @@ def worker_env(seat):
 
 
 # ---------- schema ----------
-STATUSES = ("queued", "leased", "running", "done", "failed", "needs_review", "blocked", "cached")
+STATUSES = ("queued", "leased", "running", "done", "failed", "needs_review", "blocked", "cached", "needs_model")
 JOBS_DDL = f"""CREATE TABLE IF NOT EXISTS jobs(
   id TEXT PRIMARY KEY, goal TEXT, constraints TEXT, done_when TEXT, kind TEXT,
   seat_id TEXT, status TEXT CHECK(status IN {STATUSES}),
@@ -168,7 +168,9 @@ JOB_COLS = {  # added columns (idempotent ALTERs)
     "cli_config": "TEXT", "attach": "TEXT", "feedback": "TEXT", "feedback_note": "TEXT", "model_evidence": "TEXT",
     # v5: best-of-two (parent + two child jobs), limits gating
     "best_of_two": "INTEGER DEFAULT 0", "parent_id": "TEXT", "bo2_role": "TEXT", "job_dir": "TEXT", "winner": "TEXT",
-    "winner_reason": "TEXT", "complexity": "REAL", "search": "INTEGER DEFAULT 0"}
+    "winner_reason": "TEXT", "complexity": "REAL", "search": "INTEGER DEFAULT 0",
+    # v6: requested model not available -> status needs_model with a JSON note
+    "model_issue": "TEXT", "requested_model": "TEXT"}
 SCHEMA = JOBS_DDL + """;
 CREATE TABLE IF NOT EXISTS seats(
   id TEXT PRIMARY KEY, cli TEXT, home_dir TEXT, model TEXT,
@@ -217,7 +219,7 @@ def db():
     if "evidence" not in {r[1] for r in c.execute("PRAGMA table_info(decisions)")}:
         c.execute("ALTER TABLE decisions ADD COLUMN evidence TEXT")
     sql = c.execute("SELECT sql FROM sqlite_master WHERE name='jobs'").fetchone()[0]
-    if "needs_review" not in sql:  # widen the status CHECK: rebuild table once (v1 -> v2)
+    if "needs_model" not in sql:  # widen the status CHECK: rebuild table once (v1 -> v2, v2.5 -> v2.6 needs_model)
         cols = ",".join(r[1] for r in c.execute("PRAGMA table_info(jobs)"))
         c.executescript(f"BEGIN; ALTER TABLE jobs RENAME TO jobs_v1; {JOBS_DDL}; COMMIT;")
         for col, typ in JOB_COLS.items(): c.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typ}")
