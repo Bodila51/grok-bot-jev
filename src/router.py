@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from src.config import load_config, resolve_log_path
@@ -7,15 +8,23 @@ from src.jev_client import system_one
 from src.logger import log_run
 
 
-BYPASS_MARKERS = ("bypass jev", "bypass jev:", "no jev")
+# Whole-word markers, checked only in fields the user authors (never in notes/raw,
+# which may carry pasted page content), or an explicit boolean set by the skill.
+BYPASS_RE = re.compile(r"\b(?:bypass jev|no jev)\b", re.IGNORECASE)
 
 
 def _bypassed(state: dict[str, Any]) -> bool:
-    raw = " ".join(
-        str(state.get(k, ""))
-        for k in ("goal", "raw", "user_message", "notes")
-    ).lower()
-    return any(m in raw for m in BYPASS_MARKERS)
+    if state.get("bypass_jev") is True:
+        return True
+    text = " ".join(str(state.get(k) or "") for k in ("goal", "user_message"))
+    return bool(BYPASS_RE.search(text))
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def route_task(state: dict[str, Any]) -> dict[str, Any]:
@@ -48,8 +57,8 @@ def route_task(state: dict[str, Any]) -> dict[str, Any]:
         "has_cached_artifact": bool(state.get("cached_artifact")),
         "cached_note": state.get("cached_note") or "",
         "prior_error": state.get("prior_error") or "",
-        "same_error_count": int(state.get("same_error_count") or 0),
-        "sources_found": int(state.get("sources_found") or 0),
+        "same_error_count": _int(state.get("same_error_count")),
+        "sources_found": _int(state.get("sources_found")),
         "constraints": state.get("constraints") or "",
     }
 
@@ -85,12 +94,32 @@ def route_task(state: dict[str, Any]) -> dict[str, Any]:
         ),
     }
 
-    result = system_one(jstate, questions, model=model)
-    intent = result.choices["intent"]
-    reuse = result.nouls["reuse_cache"]
-    sub = result.nouls["needs_subagent"]
-    stop = result.nouls["stop_retry"]
-    complexity = result.scores["complexity"]
+    try:
+        result = system_one(jstate, questions, model=model)
+        intent = result.choices["intent"]
+        reuse = result.nouls["reuse_cache"]
+        sub = result.nouls["needs_subagent"]
+        stop = result.nouls["stop_retry"]
+        complexity = result.scores["complexity"]
+    except Exception as exc:  # network, auth, rate limit, unexpected shape
+        # Fall back to the normal Grok Bot path instead of crashing the caller.
+        out = {
+            "action": "proceed_full",
+            "reason": f"jev unavailable: {type(exc).__name__}",
+            "mode": cfg.get("mode"),
+            "jev_used": False,
+            "details": {},
+        }
+        log_run(
+            log_path,
+            {
+                "event": "route_error",
+                "goal": jstate["goal"][:300],
+                "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                **{k: out[k] for k in ("action", "reason", "mode")},
+            },
+        )
+        return out
 
     reuse_n = float(reuse.noul)
     sub_n = float(sub.noul)
@@ -101,10 +130,15 @@ def route_task(state: dict[str, Any]) -> dict[str, Any]:
     action = "proceed_full"
     reason = "default full Grok Bot work"
 
-    if jstate["has_cached_artifact"] and reuse_n >= float(thr.get("reuse_min", 0.65)):
+    if intent.choice == "account":
+        action = "ask_human"
+        reason = "account/irreversible class — require approval"
+    elif jstate["has_cached_artifact"] and reuse_n >= float(thr.get("reuse_min", 0.65)):
         action = "reuse_cache"
         reason = f"reuse_cache noul={reuse_n:.2f}"
-    elif jstate["same_error_count"] >= int(limits.get("max_retries_same_error", 1)) and stop_n >= 0.55:
+    elif jstate["same_error_count"] >= int(limits.get("max_retries_same_error", 1)) and stop_n >= float(
+        thr.get("stop_retry_min", 0.55)
+    ):
         action = "stop_retry"
         reason = f"stop_retry noul={stop_n:.2f} same_error_count={jstate['same_error_count']}"
     elif intent.choice == "lookup" and float(intent.confidence) >= float(thr.get("min_choice_confidence", 0.55)):
@@ -113,9 +147,6 @@ def route_task(state: dict[str, Any]) -> dict[str, Any]:
     elif intent.choice == "chat" and float(intent.confidence) >= float(thr.get("min_choice_confidence", 0.55)):
         action = "chat_only"
         reason = "intent=chat"
-    elif intent.choice == "account":
-        action = "ask_human"
-        reason = "account/irreversible class — require approval"
     elif sub_n >= float(thr.get("subagent_min", 0.75)):
         action = "allow_subagent"
         reason = f"needs_subagent noul={sub_n:.2f}"

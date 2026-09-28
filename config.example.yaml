@@ -9,6 +9,7 @@ mode: shadow  # shadow | active
 thresholds:
   min_choice_confidence: 0.55
   reuse_min: 0.65
+  stop_retry_min: 0.55
   subagent_min: 0.75
 
 limits:
